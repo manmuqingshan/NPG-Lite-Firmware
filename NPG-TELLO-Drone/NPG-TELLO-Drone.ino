@@ -53,7 +53,6 @@ uint32_t bootback_val = 4; // Button toggle value (4=toggle state)
 unsigned long lastCmdTime = 0;
 const unsigned long cmdCooldown = 200; // 0.2 sec between commands
 
-
 void sendCommandSafe(const String &cmd)
 {
     unsigned long now = millis();
@@ -74,7 +73,6 @@ void sendCommandSafe(const String &cmd)
 
 // Some variables to keep track on device connected
 bool deviceConnected = false;
-bool oldDeviceConnected = false;
 Adafruit_NeoPixel pixel(6, 15, NEO_GRB + NEO_KHZ800);
 
 // Variable that will continuously be increased and written to the client
@@ -106,17 +104,18 @@ uint32_t betaThreshold = 4;
 
 // ----------------- USER CONFIGURATION -----------------
 // Add this after existing defines:
-#define ENVELOPE_WINDOW_MS 100  // Smoothing window in milliseconds
+#define ENVELOPE_WINDOW_MS 100 // Smoothing window in milliseconds
 #define ENVELOPE_WINDOW_SIZE ((ENVELOPE_WINDOW_MS * SAMPLE_RATE) / 1000)
 
-const unsigned long BLINK_DEBOUNCE_MS   = 250;   // minimal spacing between individual blinks
-const unsigned long DOUBLE_BLINK_MS     = 800;   // max time between the two blinks
-const unsigned long TRIPLE_BLINK_MS     = 1000;  // max time between all three blinks
+const unsigned long BLINK_DEBOUNCE_MS = 250; // minimal spacing between individual blinks
+const unsigned long DOUBLE_BLINK_MS = 800;   // max time between the two blinks
+const unsigned long TRIPLE_BLINK_MS = 1000;  // max time between all three blinks
 
-unsigned long lastBlinkTime     = 0;             // time of most recent blink
-unsigned long firstBlinkTime    = 0;             // time of the first blink in a pair
-int         blinkCount         = 0;             // how many valid blinks so far (0–2)
-bool        menu           = LOW;            // current menu state (LOW = vertical movement, HIGH = rotation)
+unsigned long lastBlinkTime = 0;  // time of most recent blink
+unsigned long firstBlinkTime = 0; // time of the first blink in a pair
+int blinkCount = 0;               // how many valid blinks so far (0–2)
+bool menu = LOW;                  // current menu state (LOW = vertical movement, HIGH = rotation)
+bool isAirborne = false;
 
 float BlinkThreshold = 50.0;
 
@@ -184,15 +183,15 @@ public:
 // Reference: https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.butter.html
 float highpass(float input)
 {
-  float output = input;
-  {
-    static float z1, z2; // filter section state
-    float x = output - -1.91327599*z1 - 0.91688335*z2;
-    output = 0.95753983*x + -1.91507967*z1 + 0.95753983*z2;
-    z2 = z1;
-    z1 = x;
-  }
-  return output;
+    float output = input;
+    {
+        static float z1, z2; // filter section state
+        float x = output - -1.91327599 * z1 - 0.91688335 * z2;
+        output = 0.95753983 * x + -1.91507967 * z1 + 0.95753983 * z2;
+        z2 = z1;
+        z1 = x;
+    }
+    return output;
 }
 
 // ----------------- EMG FILTER CLASSES -----------------
@@ -382,7 +381,11 @@ void processFFT()
     // If the power exceeds the threshold (set as 2% of the total power), the threshold value can be adjusted based on your beta parameters.
     if (((smoothedPowers.beta / T) * 100) > betaThreshold)
     {
-        sendCommandSafe("takeoff");
+        if (!isAirborne)
+        {
+            sendCommandSafe("takeoff");
+            isAirborne = true;
+        }
     }
 }
 
@@ -402,13 +405,13 @@ void setup()
         Serial.print(".");
     }
     Serial.println("\nConnected to Tello!");
-
+    deviceConnected = true;
     udp.begin(8889);
 
     // Enter SDK mode
     sendCommandSafe("command");
     delay(1000);
-    
+
     // ----- Initialize Neopixel LED -----
     pixel.begin();
     // Set the Neopixel to red (indicating device turned on)
@@ -416,7 +419,7 @@ void setup()
     pixel.setPixelColor(2, pixel.Color(0, 0, 0));
     pixel.setPixelColor(5, pixel.Color(0, 0, 0));
     pixel.show();
-    
+
     pinMode(INPUT_PIN1, INPUT);
     pinMode(INPUT_PIN2, INPUT);
     pinMode(INPUT_PIN3, INPUT);
@@ -430,7 +433,7 @@ void loop()
     static unsigned long lastMicros = micros();
     unsigned long now = micros(), dt = now - lastMicros;
     lastMicros = now;
-    
+
     // Update NeoPixel based on connection status
     if (deviceConnected)
     {
@@ -455,12 +458,11 @@ void loop()
         float notchFiltered1 = filters[0].process(raw1);
         float notchFiltered2 = filters[1].process(raw2);
         float notchFiltered3 = filters[2].process(raw3);
-        
-        float filt = EEGFilter(notchFiltered1);
+
+        float filteeg = EEGFilter(notchFiltered1);
         float filtered = highpass(filt);
         currentEEGEnvelope = updateEEGEnvelope(filtered);
 
-        float filteeg = EEGFilter(notchFiltered1);
         float filtemg2 = emgfilters[1].process(notchFiltered2);
         float filtemg3 = emgfilters[2].process(notchFiltered3);
         inputBuffer[idx++] = filteeg;
@@ -476,7 +478,7 @@ void loop()
         if (currentEEGEnvelope > BlinkThreshold && (nowMs - lastBlinkTime) >= BLINK_DEBOUNCE_MS)
         {
             lastBlinkTime = nowMs; // mark this blink
-            
+
             if (blinkCount == 0)
             {
                 // first blink of the sequence
@@ -495,22 +497,20 @@ void loop()
             {
                 // third blink detected within triple blink time window
                 Serial.println("Third blink - TRIPLE BLINK DETECTED!");
-                
+
                 // Handle triple blink action
-                menu = !menu;  // Toggle the menu state
+                menu = !menu; // Toggle the menu state
                 if (menu)
                 {
                     Serial.println("Menu ON - EMG controls set to rotation");
                     pixel.setPixelColor(0, pixel.Color(255, 255, 0)); // Yellow indicating running
-
                 }
                 else
                 {
                     Serial.println("Menu OFF - EMG controls set to vertical movement");
                     pixel.setPixelColor(0, pixel.Color(255, 0, 0)); // RED indicating running
-
                 }
-                
+
                 blinkCount = 0; // Reset for next sequence
             }
             else
@@ -528,11 +528,8 @@ void loop()
             // This is a confirmed DOUBLE BLINK
             Serial.println("DOUBLE BLINK CONFIRMED - sending forward/backward commands");
             sendCommandSafe("flip r");
-            sendCommandSafe("flip r");
-            sendCommandSafe("flip r");
-            sendCommandSafe("flip r");
-            pixel.setPixelColor(2, pixel.Color(0, 0, 255)); // Blue color 
-            
+            pixel.setPixelColor(2, pixel.Color(0, 0, 255)); // Blue color
+
             blinkCount = 0; // Reset for next sequence
             // pixel.setPixelColor(4, pixel.Color(0, 0, 0));
         }
@@ -580,20 +577,6 @@ void loop()
         {
             processFFT();
             idx = 0;
-        }
-
-        // Disconnecting
-        if (!deviceConnected && oldDeviceConnected)
-        {
-            delay(500); // give the bluetooth stack the chance to get things ready
-            Serial.println("start advertising");
-            oldDeviceConnected = deviceConnected;
-        }
-        // Connecting
-        if (deviceConnected && !oldDeviceConnected)
-        {
-            // do stuff here on connecting
-            oldDeviceConnected = deviceConnected;
         }
     }
 }
