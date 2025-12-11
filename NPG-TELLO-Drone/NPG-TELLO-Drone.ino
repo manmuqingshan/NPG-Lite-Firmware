@@ -608,7 +608,7 @@ void loop()
         {
             if (menu) // Menu ON (rotation mode)
             {
-                sendCommandSafe("forward 50"); // Counter-clockwise rotation
+                sendCommandSafe("forward 50"); // Move forward
                 Serial.println("Menu ON - EMG1 > 150 - Sent: forward 50");
             }
             else // Menu OFF (vertical movement mode)
