@@ -33,7 +33,6 @@ typedef struct
 } BandpowerResults;
 
 // constants won't change. They're used here to set pin numbers:
-const char *tello_ssid = "TELLO-95780E"; // Replace with your Tello WiFi name
 const char *tello_pass = "";             // Tello has no password
 
 WiFiUDP udp;
@@ -104,18 +103,17 @@ uint32_t betaThreshold = 4;
 
 // ----------------- USER CONFIGURATION -----------------
 // Add this after existing defines:
-#define ENVELOPE_WINDOW_MS 100 // Smoothing window in milliseconds
+#define ENVELOPE_WINDOW_MS 100  // Smoothing window in milliseconds
 #define ENVELOPE_WINDOW_SIZE ((ENVELOPE_WINDOW_MS * SAMPLE_RATE) / 1000)
 
-const unsigned long BLINK_DEBOUNCE_MS = 250; // minimal spacing between individual blinks
-const unsigned long DOUBLE_BLINK_MS = 800;   // max time between the two blinks
-const unsigned long TRIPLE_BLINK_MS = 1000;  // max time between all three blinks
+const unsigned long BLINK_DEBOUNCE_MS   = 250;   // minimal spacing between individual blinks
+const unsigned long DOUBLE_BLINK_MS     = 800;   // max time between the two blinks
+const unsigned long TRIPLE_BLINK_MS     = 1000;  // max time between all three blinks
 
-unsigned long lastBlinkTime = 0;  // time of most recent blink
-unsigned long firstBlinkTime = 0; // time of the first blink in a pair
-int blinkCount = 0;               // how many valid blinks so far (0–2)
-bool menu = LOW;                  // current menu state (LOW = vertical movement, HIGH = rotation)
-bool isAirborne = false;
+unsigned long lastBlinkTime     = 0;             // time of most recent blink
+unsigned long firstBlinkTime    = 0;             // time of the first blink in a pair
+int         blinkCount         = 0;             // how many valid blinks so far (0–2)
+bool        menu           = LOW;            // current menu state (LOW = vertical movement, HIGH = rotation)
 
 float BlinkThreshold = 50.0;
 
@@ -183,15 +181,15 @@ public:
 // Reference: https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.butter.html
 float highpass(float input)
 {
-    float output = input;
-    {
-        static float z1, z2; // filter section state
-        float x = output - -1.91327599 * z1 - 0.91688335 * z2;
-        output = 0.95753983 * x + -1.91507967 * z1 + 0.95753983 * z2;
-        z2 = z1;
-        z1 = x;
-    }
-    return output;
+  float output = input;
+  {
+    static float z1, z2; // filter section state
+    float x = output - -1.91327599*z1 - 0.91688335*z2;
+    output = 0.95753983*x + -1.91507967*z1 + 0.95753983*z2;
+    z2 = z1;
+    z1 = x;
+  }
+  return output;
 }
 
 // ----------------- EMG FILTER CLASSES -----------------
@@ -381,11 +379,74 @@ void processFFT()
     // If the power exceeds the threshold (set as 2% of the total power), the threshold value can be adjusted based on your beta parameters.
     if (((smoothedPowers.beta / T) * 100) > betaThreshold)
     {
-        if (!isAirborne)
+        sendCommandSafe("takeoff");
+    }
+}
+
+// Function to find and connect to any Tello drone
+bool connectToAnyTello()
+{
+    Serial.println("Scanning for Tello drones...");
+    
+    // Scan for available WiFi networks
+    int n = WiFi.scanNetworks();
+    Serial.print("Found ");
+    Serial.print(n);
+    Serial.println(" networks");
+    
+    String telloSSID = "";
+    
+    // Look for networks with "TELLO-" prefix
+    for (int i = 0; i < n; i++)
+    {
+        String ssid = WiFi.SSID(i);
+        Serial.print(i + 1);
+        Serial.print(": ");
+        Serial.print(ssid);
+        Serial.print(" (");
+        Serial.print(WiFi.RSSI(i));
+        Serial.println(" dBm)");
+        
+        if (ssid.startsWith("TELLO-"))
         {
-            sendCommandSafe("takeoff");
-            isAirborne = true;
+            telloSSID = ssid;
+            Serial.print("Found Tello drone: ");
+            Serial.println(telloSSID);
+            break;
         }
+    }
+    
+    if (telloSSID.length() == 0)
+    {
+        Serial.println("No Tello drone found!");
+        return false;
+    }
+    
+    // Connect to the found Tello
+    Serial.print("Connecting to ");
+    Serial.println(telloSSID);
+    
+    WiFi.begin(telloSSID.c_str(), tello_pass);
+    
+    int attempts = 0;
+    while (WiFi.status() != WL_CONNECTED && attempts < 30)
+    {
+        delay(500);
+        Serial.print(".");
+        attempts++;
+    }
+    
+    if (WiFi.status() == WL_CONNECTED)
+    {
+        Serial.println("\nConnected to Tello!");
+        Serial.print("IP Address: ");
+        Serial.println(WiFi.localIP());
+        return true;
+    }
+    else
+    {
+        Serial.println("\nFailed to connect to Tello!");
+        return false;
     }
 }
 
@@ -396,22 +457,20 @@ void setup()
 
     delay(500);
 
-    Serial.println("Connecting to Tello WiFi...");
-    WiFi.begin(tello_ssid, tello_pass);
-
-    while (WiFi.status() != WL_CONNECTED)
+    // Try to connect to any Tello drone
+    if (!connectToAnyTello())
     {
-        delay(200);
-        Serial.print(".");
+        Serial.println("Could not connect to any Tello drone. Retrying in 2 seconds...");
+        delay(1000);
+        ESP.restart();
     }
-    Serial.println("\nConnected to Tello!");
-    deviceConnected = true;
+
     udp.begin(8889);
 
     // Enter SDK mode
     sendCommandSafe("command");
     delay(1000);
-
+    
     // ----- Initialize Neopixel LED -----
     pixel.begin();
     // Set the Neopixel to red (indicating device turned on)
@@ -419,7 +478,7 @@ void setup()
     pixel.setPixelColor(2, pixel.Color(0, 0, 0));
     pixel.setPixelColor(5, pixel.Color(0, 0, 0));
     pixel.show();
-
+    
     pinMode(INPUT_PIN1, INPUT);
     pinMode(INPUT_PIN2, INPUT);
     pinMode(INPUT_PIN3, INPUT);
@@ -433,7 +492,7 @@ void loop()
     static unsigned long lastMicros = micros();
     unsigned long now = micros(), dt = now - lastMicros;
     lastMicros = now;
-
+    
     // Update NeoPixel based on connection status
     if (deviceConnected)
     {
@@ -458,9 +517,9 @@ void loop()
         float notchFiltered1 = filters[0].process(raw1);
         float notchFiltered2 = filters[1].process(raw2);
         float notchFiltered3 = filters[2].process(raw3);
-
+        
         float filteeg = EEGFilter(notchFiltered1);
-        float filtered = highpass(filt);
+        float filtered = highpass(filteeg);
         currentEEGEnvelope = updateEEGEnvelope(filtered);
 
         float filtemg2 = emgfilters[1].process(notchFiltered2);
@@ -478,7 +537,7 @@ void loop()
         if (currentEEGEnvelope > BlinkThreshold && (nowMs - lastBlinkTime) >= BLINK_DEBOUNCE_MS)
         {
             lastBlinkTime = nowMs; // mark this blink
-
+            
             if (blinkCount == 0)
             {
                 // first blink of the sequence
@@ -497,9 +556,9 @@ void loop()
             {
                 // third blink detected within triple blink time window
                 Serial.println("Third blink - TRIPLE BLINK DETECTED!");
-
+                
                 // Handle triple blink action
-                menu = !menu; // Toggle the menu state
+                menu = !menu;  // Toggle the menu state
                 if (menu)
                 {
                     Serial.println("Menu ON - EMG controls set to rotation");
@@ -510,7 +569,7 @@ void loop()
                     Serial.println("Menu OFF - EMG controls set to vertical movement");
                     pixel.setPixelColor(0, pixel.Color(255, 0, 0)); // RED indicating running
                 }
-
+                
                 blinkCount = 0; // Reset for next sequence
             }
             else
@@ -528,8 +587,8 @@ void loop()
             // This is a confirmed DOUBLE BLINK
             Serial.println("DOUBLE BLINK CONFIRMED - sending forward/backward commands");
             sendCommandSafe("flip r");
-            pixel.setPixelColor(2, pixel.Color(0, 0, 255)); // Blue color
-
+            pixel.setPixelColor(2, pixel.Color(0, 0, 255)); // Blue color 
+            
             blinkCount = 0; // Reset for next sequence
             // pixel.setPixelColor(4, pixel.Color(0, 0, 0));
         }
