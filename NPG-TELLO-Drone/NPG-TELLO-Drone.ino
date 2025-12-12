@@ -439,7 +439,7 @@ void setup() {
   delay(1000);
   // ----- Initialize Neopixel LED -----
   pixel.begin();
-  // Set the Neopixel to red (indicating device turned on)
+  // Set the Neopixel to off
   pixel.setPixelColor(0, pixel.Color(0, 0, 0));
   pixel.setPixelColor(2, pixel.Color(0, 0, 0));
   pixel.setPixelColor(5, pixel.Color(0, 0, 0));
