@@ -425,7 +425,7 @@ void setup() {
 
   // Try to connect to any Tello drone
   if (!connectToAnyTello()) {
-    Serial.println("Could not connect to any Tello drone. Retrying in 2 seconds...");
+    Serial.println("Could not connect to any Tello drone. Retrying in 1 seconds...");
     delay(1000);
     ESP.restart();
   }
