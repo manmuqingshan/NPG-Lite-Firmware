@@ -39,13 +39,6 @@ WiFiUDP udp;
 const char *TELLO_IP = "192.168.10.1";
 const int TELLO_PORT = 8889;
 
-// Variables will change:
-uint32_t buttonState;       // the current reading from the input pin
-int lastButtonState = LOW;  // the previous reading from the input pin
-uint32_t bci_val = 0;       // EEG-based control value (0=stop, 3=forward)
-uint32_t emg1_val1 = 0;     // Left EMG control value (0=inactive, 1=left turn)
-uint32_t emg2_val2 = 0;     // Right EMG control value (0=inactive, 2=right turn)
-
 // the following variables are unsigned longs because the time, measured in
 // milliseconds, will quickly become a bigger number than can be stored in an int.
 unsigned long lastCmdTime = 0;
@@ -71,9 +64,6 @@ void sendCommandSafe(const String &cmd) {
 // Some variables to keep track on device connected
 bool deviceConnected = false;
 Adafruit_NeoPixel pixel(6, 15, NEO_GRB + NEO_KHZ800);
-
-// Variable that will continuously be increased and written to the client
-uint32_t value = 0;
 uint32_t betaThreshold = 8;
 
 // ----------------- USER CONFIGURATION -----------------
@@ -112,7 +102,7 @@ const unsigned long TRIPLE_BLINK_MS = 1000;   // max time between all three blin
 unsigned long lastBlinkTime = 0;   // time of most recent blink
 unsigned long firstBlinkTime = 0;  // time of the first blink in a pair
 int blinkCount = 0;                // how many valid blinks so far (0–2)
-bool menu = LOW;                   // current menu state (LOW = vertical movement, HIGH = rotation)
+bool is_rotation_mode = LOW;                   // current is_rotation_mode state (LOW = vertical movement, HIGH = rotation)
 
 float BlinkThreshold = 50.0;
 
@@ -266,10 +256,10 @@ float updateEEGEnvelope(float sample) {
   return envelopeSum / ENVELOPE_WINDOW_SIZE;  // Return moving average
 }
 
-NotchFilter filters[3];              // Notch filters for all 3 input channels
-EMGHighPassFilter emgfilters[3];     // Fixed: Changed from 2 to 3 elements for all channels
-EnvelopeFilter Envelopefilter1(16);  // Envelope detector for left EMG
-EnvelopeFilter Envelopefilter2(16);  // Envelope detector for right EMG
+NotchFilter notchFilters[3];              // Notch filters for all 3 input channels
+EMGHighPassFilter emgFilters[3];     // Fixed: Changed from 2 to 3 elements for all channels
+EnvelopeFilter envelopeFilter1(16);  // Envelope detector for left EMG
+EnvelopeFilter envelopeFilter2(16);  // Envelope detector for right EMG
 
 // ----------------- BANDPOWER & SMOOTHING -----------------
 BandpowerResults calculateBandpower(float *ps, float binRes, int halfSize) {
@@ -478,20 +468,20 @@ void loop() {
       int raw3 = analogRead(INPUT_PIN3);
 
       // Fixed: Use existing filter objects instead of creating new ones
-      float notchFiltered1 = filters[0].process(raw1);
-      float notchFiltered2 = filters[1].process(raw2);
-      float notchFiltered3 = filters[2].process(raw3);
+      float notchFiltered1 = notchFilters[0].process(raw1);
+      float notchFiltered2 = notchFilters[1].process(raw2);
+      float notchFiltered3 = notchFilters[2].process(raw3);
 
-      float filteeg = EEGFilter(notchFiltered1);
-      float filtered = highpass(filteeg);
+      float filteredEEG = EEGFilter(notchFiltered1);
+      float filtered = highpass(filteredEEG);
       currentEEGEnvelope = updateEEGEnvelope(filtered);
 
-      float filtemg2 = emgfilters[1].process(notchFiltered2);
-      float filtemg3 = emgfilters[2].process(notchFiltered3);
-      inputBuffer[idx++] = filteeg;
+      float filteredEMG2 = emgFilters[1].process(notchFiltered2);
+      float filteredEMG3 = emgFilters[2].process(notchFiltered3);
+      inputBuffer[idx++] = filteredEEG;
 
-      float env1 = Envelopefilter1.getEnvelope(abs(filtemg2));
-      float env2 = Envelopefilter2.getEnvelope(abs(filtemg3));
+      float env1 = envelopeFilter1.getEnvelope(abs(filteredEMG2)); //ch1 - right EMG
+      float env2 = envelopeFilter2.getEnvelope(abs(filteredEMG3)); //ch2 - left EMG
 
       // Normal running state processing
       unsigned long nowMs = millis();
@@ -516,12 +506,12 @@ void loop() {
           Serial.println("Third blink - TRIPLE BLINK DETECTED!");
 
           // Handle triple blink action
-          menu = !menu;  // Toggle the menu state
-          if (menu) {
-            Serial.println("Menu ON - EMG controls set to rotation");
+          is_rotation_mode = !is_rotation_mode;  // Toggle the is_rotation_mode state
+          if (is_rotation_mode) {
+            Serial.println("is_rotation_mode ON - EMG controls set to rotation");
             pixel.setPixelColor(0, pixel.Color(255, 255, 0));  // Yellow indicating running
           } else {
-            Serial.println("Menu OFF - EMG controls set to vertical movement");
+            Serial.println("is_rotation_mode OFF - EMG controls set to vertical movement");
             pixel.setPixelColor(0, pixel.Color(255, 0, 0));  // RED indicating running
           }
 
@@ -552,27 +542,27 @@ void loop() {
       }
 
       // ========== EMG CONTROLS ==========
-      // These work continuously based on the current menu state
+      // These work continuously based on the current is_rotation_mode state
       // (triggered by triple blink to toggle between modes)
       if (env1 > 150) {
-        if (menu)  // Menu ON (rotation mode)
+        if (is_rotation_mode)  // is_rotation_mode ON (rotation mode)
         {
           sendCommandSafe("forward 50");  // Move forward
-          Serial.println("Menu ON - EMG1 > 150 - Sent: forward 50");
-        } else  // Menu OFF (vertical movement mode)
+          Serial.println("is_rotation_mode ON - EMG1 > 150 - Sent: forward 50");
+        } else  // is_rotation_mode OFF (vertical movement mode)
         {
           sendCommandSafe("up 50");  // Move up
-          Serial.println("Menu OFF - EMG1 > 150 - Sent: up 50");
+          Serial.println("is_rotation_mode OFF - EMG1 > 150 - Sent: up 50");
         }
       } else if (env2 > 150) {
-        if (menu)  // Menu ON (rotation mode)
+        if (is_rotation_mode)  // is_rotation_mode ON (rotation mode)
         {
           sendCommandSafe("cw 50");  // Clockwise rotation
-          Serial.println("Menu ON - EMG2 > 150 - Sent: cw 50");
-        } else  // Menu OFF (vertical movement mode)
+          Serial.println("is_rotation_mode ON - EMG2 > 150 - Sent: cw 50");
+        } else  // is_rotation_mode OFF (vertical movement mode)
         {
           sendCommandSafe("down 50");  // Move down
-          Serial.println("Menu OFF - EMG2 > 150 - Sent: down 50");
+          Serial.println("is_rotation_mode OFF - EMG2 > 150 - Sent: down 50");
         }
       }
       // ========== END EMG CONTROLS ==========
