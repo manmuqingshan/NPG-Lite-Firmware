@@ -408,7 +408,7 @@ void toggleCurrentChannel() {
       pCharacteristic_1->setValue(&currentChannel, 1);
       pCharacteristic_1->notify();
     }
-  }0
+  }
 }
 
 // ----------------- BLE CALLBACK -----------------
