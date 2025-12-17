@@ -82,7 +82,7 @@ float betaThreshold = 12.0; // Adjust this value based on your testing
 
 // Focus detection debouncing
 unsigned long lastFocusTime = 0;
-const unsigned long focusDebounceMs = 2000; // 1 second debounce for focus events
+const unsigned long focusDebounceMs = 2000; // 2 second debounce for focus events
 
 // NeoPixel animation variables
 unsigned long lastledBlinkUpdate = 0;
