@@ -132,7 +132,6 @@ bool emergencyStop = false;                    // Global emergency stop flag
 unsigned long lastButtonPressTime = 0;         // For button debouncing
 const unsigned long BUTTON_DEBOUNCE_MS = 500;  // Button debounce time
 unsigned long lastLandCommandTime = 0;         // For continuous land commands
-const unsigned long LAND_COOLDOWN = 5000;      // Send land command every 300ms in emergency mode
 
 // Police LED and buzzer timing
 unsigned long lastPoliceFlashTime = 0;   // For police-style LED flashing
@@ -218,7 +217,7 @@ public:
 float highpass(float input) {
   float output = input;
   {
-    static float z1, z2;  // filter section state
+    static float z1 = 0, z2 = 0;  // filter section state - initialized to 0
     float x = output - -1.91327599 * z1 - 0.91688335 * z2;
     output = 0.95753983 * x + -1.91507967 * z1 + 0.95753983 * z2;
     z2 = z1;
@@ -298,7 +297,7 @@ float EEGFilter(float input) {
 float jawClenchFilter(float input) {
   float output = input;
   {
-    static float z1, z2;  // filter section state
+    static float z1 = 0, z2 = 0;  // filter section state - initialized to 0
     float x = output - -0.85080258 * z1 - 0.30256882 * z2;
     output = 0.53834285 * x + -1.07668570 * z1 + 0.53834285 * z2;
     z2 = z1;

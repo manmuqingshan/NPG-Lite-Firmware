@@ -317,7 +317,7 @@ void processFFT() {
   float T = smoothedPowers.total + EPS;
   Serial.println(((smoothedPowers.beta / T) * 100));  // for debugging purpose only
 
-  // If the power exceeds the threshold (set as 2% of the total power), the threshold value can be adjusted based on your beta parameters.
+  // If the power exceeds the threshold (set as 4% of the total power), the threshold value can be adjusted based on your beta parameters.
   if (((smoothedPowers.beta / T) * 100) > betaThreshold && !isGoingBackward) {
     bci_val = 3;
     Serial.println("send 3");
