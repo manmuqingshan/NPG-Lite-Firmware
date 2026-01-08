@@ -755,14 +755,14 @@ void setup() {
     connected = connectToAnyTello();
     attempts++;
     
-    if (!connected && attempts < 10) {
+    if (!connected && attempts <3) {
       Serial.println("Connection failed, retrying in 2 seconds...");
       delay(2000);
     }
   }
 
   if (!connected) {
-    Serial.println("Could not connect to any Tello drone after 10 attempts.");
+    Serial.println("Could not connect to any Tello drone after 3 attempts.");
     Serial.println("Continuing without drone - device will wait for connection.");
     Serial.println("You can restart the device when Tello is ready.");
     
