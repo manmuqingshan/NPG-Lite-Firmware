@@ -774,7 +774,7 @@ void setup() {
   } else {
     // Only initialize UDP if WiFi is connected
     udp.begin(8889);
-    udpConnected = false;
+    udpConnected = true;
 
     // Enter SDK mode
     sendCommandSafe("command");
