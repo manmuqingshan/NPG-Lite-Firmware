@@ -63,6 +63,12 @@ static void notifyCallback(BLERemoteCharacteristic* pBLERemoteCharacteristic,
     // print to Serial
     Serial.print("Characteristic 1 (Notify) from server: ");
     Serial.println(counter );  
+    
+    // Validate counter before array access
+    if (counter < 1 || counter > 6) {
+      Serial.println("Invalid channel received");
+      return;
+    }
     ledState[counter-1] = !ledState[counter-1];
     digitalWrite(relayPins[counter-1], (ledState[counter-1]) ? HIGH : LOW);
   }
