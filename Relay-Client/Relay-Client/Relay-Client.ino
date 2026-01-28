@@ -54,10 +54,14 @@ static void notifyCallback(BLERemoteCharacteristic* pBLERemoteCharacteristic,
                             bool isNotify) {
   if(pBLERemoteCharacteristic->getUUID().toString() == charUUID_1.toString()) {
 
-    // convert received bytes to integer
-    uint32_t counter = pData[0];
-    for(int i = 1; i<length; i++) {
-      counter = counter | (pData[i] << i*8);
+    if (pData == nullptr || length == 0) {
+      Serial.println("Empty notification received");
+      return;
+    }
+
+    uint32_t counter = (uint32_t)pData[0];
+    for (size_t i = 1; i < length && i < 4; i++) {
+      counter |= ((uint32_t)pData[i]) << (8 * i);
     }
 
     // print to Serial
@@ -200,7 +204,7 @@ void loop() {
     if (connectToServer()) {
       Serial.println("We are now connected to the BLE Server.");
     } else {
-      Serial.println("We have failed to connect to the server; there is nothin more we will do.");
+      Serial.println("We have failed to connect to the server; there is nothing more we will do.");
     }
     doConnect = false;
   }

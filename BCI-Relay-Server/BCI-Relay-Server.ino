@@ -640,13 +640,18 @@ void loop() {
   updateNeoPixels();
   
   // Handle BLE connection state
+  static unsigned long lastAdvertisingRestart = 0;
+
   if (!deviceConnected && oldDeviceConnected) {
-    delay(500);
-    pServer->startAdvertising();
-    Serial.println("start advertising");
-    oldDeviceConnected = deviceConnected;
+    unsigned long now = millis();
+    if (now - lastAdvertisingRestart >= 500) {
+      pServer->startAdvertising();
+      Serial.println("start advertising");
+      oldDeviceConnected = deviceConnected;
+      lastAdvertisingRestart = now;
+    }
   }
-  
+
   if (deviceConnected && !oldDeviceConnected) {
     oldDeviceConnected = deviceConnected;
   }
