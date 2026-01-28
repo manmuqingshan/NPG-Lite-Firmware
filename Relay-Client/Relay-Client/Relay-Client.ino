@@ -98,7 +98,11 @@ bool connectToServer() {
   pClient->setClientCallbacks(new MyClientCallback());
 
   // Connect to the remove BLE Server.
-  pClient->connect(myDevice);  // if you pass BLEAdvertisedDevice instead of address, it will be recognized type of peer device address (public or private)
+  if (!pClient->connect(myDevice)) 
+  {
+    Serial.println("Failed to connect to server");
+    return false;
+  }
   Serial.println(" - Connected to server");
 
   // Obtain a reference to the service we are after in the remote BLE server.
