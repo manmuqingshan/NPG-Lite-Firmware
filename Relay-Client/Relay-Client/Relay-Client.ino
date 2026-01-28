@@ -131,7 +131,7 @@ bool connectToServer() {
   return true;
 }
 
-// Function to chech Characteristic
+// Function to check Characteristic
 bool connectCharacteristic(BLERemoteService* pRemoteService, BLERemoteCharacteristic* l_BLERemoteChar) {
   // Obtain a reference to the characteristic in the service of the remote BLE server.
   if (l_BLERemoteChar == nullptr) {
@@ -152,17 +152,21 @@ class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
   void onResult(BLEAdvertisedDevice advertisedDevice) {
     Serial.print("BLE Advertised Device found: ");
     Serial.println(advertisedDevice.toString().c_str());
-  
-    // We have found a device, let us now see if it contains the service we are looking for.
+
     if (advertisedDevice.haveServiceUUID() && advertisedDevice.isAdvertisingService(serviceUUID)) {
-  
+
       BLEDevice::getScan()->stop();
+
+      if (myDevice != nullptr) {
+        delete myDevice;
+        myDevice = nullptr;
+      }
+
       myDevice = new BLEAdvertisedDevice(advertisedDevice);
       doConnect = true;
-      doScan = true;
-  
-    } // Found our server
-  } // onResult
+      doScan = false;  // stop scanning once device is found
+    }
+  }
 }; // MyAdvertisedDeviceCallbacks
 
 void setup() {
@@ -201,9 +205,9 @@ void loop() {
     doConnect = false;
   }
 
-  if(doScan)
-  {
+  if (doScan && !connected && !doConnect) {
     BLEDevice::getScan()->start(0);
   }
+
   delay(1000);
 }
