@@ -158,6 +158,10 @@ bool deviceConnected = false;
 bool oldDeviceConnected = false;
 uint32_t value = 0;
 
+// Connection LED feedback (non-blocking; BLE callbacks should return quickly)
+volatile bool showConnectFeedback = false;
+unsigned long connectFeedbackStart = 0;
+
 #define SERVICE_UUID          "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
 #define CHARACTERISTIC_UUID_1 "beb5483e-36e1-4688-b7f5-ea07361b26a8"
 #define CHARACTERISTIC_UUID_2 "1c95d5e3-d8f7-413a-bf3d-7a2e5d7be87e"
@@ -413,16 +417,14 @@ void toggleCurrentChannel() {
 
 // ----------------- BLE CALLBACK -----------------
 class MyServerCallbacks: public BLEServerCallbacks {
-    void onConnect(BLEServer* pServer) {
-      deviceConnected = true;
-      digitalWrite(ledPin, HIGH);
-      delay(100);
-      digitalWrite(ledPin, LOW);
-    };
+  void onConnect(BLEServer* pServer) override {
+    deviceConnected = true;
+    showConnectFeedback = true; // blink handled in loop()
+  }
 
-    void onDisconnect(BLEServer* pServer) {
-      deviceConnected = false;
-    }
+  void onDisconnect(BLEServer* pServer) override {
+    deviceConnected = false;
+  }
 };
 
 // ----------------- SETUP -----------------
@@ -620,6 +622,18 @@ void loop() {
   
   lastButtonState = buttonReading;
   
+  // LED feedback without blocking BLE callback
+  if (showConnectFeedback) {
+    if (connectFeedbackStart == 0) {
+      digitalWrite(ledPin, HIGH);
+      connectFeedbackStart = millis();
+    } else if (millis() - connectFeedbackStart >= 100) {
+      digitalWrite(ledPin, LOW);
+      showConnectFeedback = false;
+      connectFeedbackStart = 0;
+    }
+  }
+
   // Update NeoPixel blink animation
   if (nowMs - lastledBlinkUpdate >= ledblinkInterval) {
     lastledBlinkUpdate = nowMs;
