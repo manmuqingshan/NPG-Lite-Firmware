@@ -124,7 +124,7 @@ float *y1_cf = &y_cf[0];
 float envelopeBuffer[ENVELOPE_WINDOW_SIZE] = {0};
 int envelopeIndex = 0;
 float envelopeSum = 0;
-float currentEEGEnvelope = 0;
+float currentEOGEnvelope = 0;
 
 // Bandpower structure
 typedef struct {
@@ -209,7 +209,7 @@ float EEGFilter(float input) {
 }
 
 // ----------------- ENVELOPE FUNCTION -----------------
-float updateEEGEnvelope(float sample) {
+float updateEOGEnvelope(float sample) {
   float absSample = fabs(sample);
   envelopeSum -= envelopeBuffer[envelopeIndex];
   envelopeSum += absSample;
@@ -510,7 +510,7 @@ void loop() {
     int raw = analogRead(INPUT_PIN);
     float filt = EEGFilter(Notch(raw));
     float filtered = highpass(filt);
-    currentEEGEnvelope = updateEEGEnvelope(filtered);
+    currentEOGEnvelope = updateEOGEnvelope(filtered);
     inputBuffer[idx++] = filt;
     
     // Process FFT when buffer is full
@@ -524,7 +524,7 @@ void loop() {
   // Handle double blink detection for channel switching (only in EEG+EOG mode)
   unsigned long nowMs = millis();
   
-  if (!manualControlMode && currentEEGEnvelope > BlinkThreshold && (nowMs - lastBlinkTime) >= BLINK_DEBOUNCE_MS) {
+  if (!manualControlMode && currentEOGEnvelope > BlinkThreshold && (nowMs - lastBlinkTime) >= BLINK_DEBOUNCE_MS) {
     lastBlinkTime = nowMs;
     
     if (blinkCount == 0) {
@@ -654,16 +654,20 @@ void loop() {
   updateNeoPixels();
   
   // Handle BLE connection state
-  static unsigned long lastAdvertisingRestart = 0;
+  static unsigned long disconnectTime = 0;
+  static bool pendingAdvertisingRestart = false;
 
   if (!deviceConnected && oldDeviceConnected) {
-    unsigned long now = millis();
-    if (now - lastAdvertisingRestart >= 500) {
-      pServer->startAdvertising();
-      Serial.println("start advertising");
-      oldDeviceConnected = deviceConnected;
-      lastAdvertisingRestart = now;
-    }
+    // Just disconnected - start the timer
+    disconnectTime = millis();
+    pendingAdvertisingRestart = true;
+    oldDeviceConnected = deviceConnected;
+  }
+
+  if (pendingAdvertisingRestart && (millis() - disconnectTime >= 500)) {
+    pServer->startAdvertising();
+    Serial.println("start advertising");
+    pendingAdvertisingRestart = false;
   }
 
   if (deviceConnected && !oldDeviceConnected) {
