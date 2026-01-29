@@ -73,7 +73,7 @@ Adafruit_NeoPixel pixels(PIXEL_COUNT, PIXEL_PIN, NEO_GRB + NEO_KHZ800);
 #define ENVELOPE_WINDOW_SIZE ((ENVELOPE_WINDOW_MS * SAMPLE_RATE) / 1000)
 
 // Blink detection parameters
-const unsigned long BLINK_DEBOUNCE_MS = 300;
+const unsigned long BLINK_DEBOUNCE_MS = 200;
 const unsigned long DOUBLE_BLINK_MS = 600;
 float BlinkThreshold = 50.0;
 
