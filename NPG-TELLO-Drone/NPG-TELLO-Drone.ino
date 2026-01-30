@@ -293,13 +293,13 @@ float EEGFilter(float input) {
   return output;
 }
 
-// NEW: Band-pass filter for jaw clench detection (10-50Hz)
+// NEW: Band-pass filter for jaw clench detection (70Hz)
 float jawClenchFilter(float input) {
   float output = input;
   {
     static float z1 = 0, z2 = 0;  // filter section state - initialized to 0
-    float x = output - -0.85080258 * z1 - 0.30256882 * z2;
-    output = 0.53834285 * x + -1.07668570 * z1 + 0.53834285 * z2;
+    float x = output - -0.82523238 * z1 - 0.29463653 * z2;
+    output = 0.52996723 * x + -1.05993445 * z1 + 0.52996723 * z2;
     z2 = z1;
     z1 = x;
   }
@@ -967,13 +967,7 @@ void loop() {
         }
       }
     }
-    // ========== END EMG CONTROLS ==========
 
-    // Debug output (optional - uncomment to see envelope values)
-    // Serial.print("Blink Envelope: ");
-    // Serial.print(currentEEGEnvelope);
-    // Serial.print(" | Jaw Envelope: ");
-    // Serial.println(currentJawEnvelope);
 
     if (idx >= FFT_SIZE) {
       processFFT();
