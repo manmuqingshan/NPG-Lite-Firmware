@@ -65,7 +65,10 @@ Adafruit_NeoPixel pixel(6, 15, NEO_GRB + NEO_KHZ800);
 
 // Variable that will continuously be increased and written to the client
 uint32_t value = 0;
-uint32_t betaThreshold = 2;
+uint32_t betaThreshold = 4;
+uint32_t emgThreshold = 150;
+bool isGoingBackward = false;  // Flag to track backward state
+
 // See the following for generating UUIDs:
 // https://www.uuidgenerator.net/
 // UUIDs used in this example:
@@ -314,8 +317,8 @@ void processFFT() {
   float T = smoothedPowers.total + EPS;
   Serial.println(((smoothedPowers.beta / T) * 100));  // for debugging purpose only
 
-  // If the power exceeds the threshold (set as 2% of the total power), the threshold value can be adjusted based on your beta parameters.
-  if (((smoothedPowers.beta / T) * 100) > betaThreshold) {
+  // If the power exceeds the threshold (set as 4% of the total power), the threshold value can be adjusted based on your beta parameters.
+  if (((smoothedPowers.beta / T) * 100) > betaThreshold && !isGoingBackward) {
     bci_val = 3;
     Serial.println("send 3");
     pCharacteristic_1->setValue(bci_val);  // for forward moving car
@@ -330,7 +333,7 @@ void processFFT() {
 }
 
 void setup() {
-    // ----- Initialize Neopixel LED -----
+  // ----- Initialize Neopixel LED -----
   pixel.begin();
   // Set the Neopixel to red (indicating device turned on)
   pixel.setPixelColor(0, pixel.Color(0, 0, 0));
@@ -394,15 +397,15 @@ void loop() {
   static unsigned long lastMicros = micros();
   unsigned long now = micros(), dt = now - lastMicros;
   lastMicros = now;
-  pixel.setPixelColor(0, pixel.Color(255, 255, 0)); // Yellow indicating running
+  pixel.setPixelColor(0, pixel.Color(255, 255, 0));  // Yellow indicating running
   // Update NeoPixel based on connection status
   if (deviceConnected) {
-    pixel.setPixelColor(5, pixel.Color(0, 255, 0)); // Green when connected
+    pixel.setPixelColor(5, pixel.Color(0, 255, 0));  // Green when connected
   } else {
-    pixel.setPixelColor(5, pixel.Color(255, 0, 0)); // Red when disconnected
+    pixel.setPixelColor(5, pixel.Color(255, 0, 0));  // Red when disconnected
   }
   pixel.show();
-  
+
   static long timer = 0;
   timer -= dt;
   if (timer <= 0) {
@@ -420,23 +423,29 @@ void loop() {
     float env2 = Envelopefilter2.getEnvelope(abs(filtemg2));
 
     // If `env1` exceeds 150, trigger left turn command (send value 1).the threshold value can be adjusted based on your emg parameters.
-    if (env1 > 150 && env2 > 150) {
+    if (env1 > emgThreshold * 0.8 && env2 > emgThreshold * 0.8) {
       bootback_val = 4;
+      isGoingBackward = true;                      // Set backward flag
       Serial.println("sent 4 - BOTH EMG ACTIVE");  // for debugging purpose only
       pCharacteristic_1->setValue(bootback_val);   // send value 4
       pCharacteristic_1->notify();
-    } else if (env1 > 150) {
+    } else if (env1 > emgThreshold) {
       emg1_val1 = 2;
+      isGoingBackward = false;                 // Not going backward anymore
       Serial.println("sent 2");                // for debugging purpose only
       pCharacteristic_1->setValue(emg1_val1);  // for left turn car
       pCharacteristic_1->notify();
     }
     // If `env2` exceeds 150, trigger right turn command (send value 2).the threshold value can be adjusted based on your emg parameters.
-    else if (env2 > 150) {
+    else if (env2 > emgThreshold) {
       emg2_val2 = 1;
+      isGoingBackward = false;  // Not going backward anymore
+
       Serial.println("sent 1");                // for debugging purpose only
       pCharacteristic_1->setValue(emg2_val2);  // for right turn car
       pCharacteristic_1->notify();
+    } else {
+      isGoingBackward = false;  // Reset backward flag
     }
   }
 
@@ -457,5 +466,4 @@ void loop() {
     // do stuff here on connecting
     oldDeviceConnected = deviceConnected;
   }
-
 }
