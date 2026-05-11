@@ -266,7 +266,7 @@ void loop() {
       secondBlinkTime = nowMs;
       blinkCount = 2;
     }
-    else if (blinkCount==2 && (nowMs - secondBlinkTime) <= triple_blink_ms)
+    else if (menu && menuIndex > 0 && blinkCount==2 && (nowMs - secondBlinkTime) <= triple_blink_ms)
     {
           pixels.setPixelColor(menuIndex-1, pixels.Color(0,10,0));
     pixels.show();
