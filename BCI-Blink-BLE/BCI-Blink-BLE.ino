@@ -56,7 +56,6 @@ unsigned long lastBlinkTime     = 0;             // time of most recent blink
 unsigned long firstBlinkTime    = 0;             // time of the first blink in a pair
 int         blinkCount         = 0;             // how many valid blinks so far (0–2)
 bool        menu           = LOW;            // current LED state
-const unsigned long TRIPLE_BLINK_MS = 1000;   // max time between all three blinks
 unsigned long tripleBlinkStartTime = 0;      // time of the first blink in a triple
 int tripleBlinkCount = 0;                    // how many valid blinks in triple sequence
 
