@@ -29,7 +29,7 @@
 #include <BLEServer.h>
 #include <BLE2902.h>
 
-// ─── Configuration ────────────────────────────────────────────────────────────
+// --- Config ---
 #define SAMPLE_RATE         512
 #define FFT_SIZE            512
 #define BAUD_RATE           115200
@@ -85,10 +85,9 @@ const unsigned long JAW_BLOCK_DURATION_MS = 500;  // suppress blinks after a cle
 const float         FOCUS_BETA_PCT    = 8.0f;   // beta % threshold to consider as focus
 const unsigned long FOCUS_INTERVAL_MS = 1000;   // send at most once per second
 
-// ─── NeoPixel ─────────────────────────────────────────────────────────────────
 Adafruit_NeoPixel pixels(PIXEL_COUNT, PIXEL_PIN, NEO_GRB + NEO_KHZ800);
 
-// ─── Vibration ────────────────────────────────────────────────────────────────
+
 enum VibratePhase { V_IDLE, V_ON, V_GAP };
 VibratePhase  vibratePhase     = V_IDLE;
 int           vibrateRemaining = 0;
@@ -118,7 +117,6 @@ void handleVibration()
   }
 }
 
-// ─── BLE ──────────────────────────────────────────────────────────────────────
 BLEServer*         pBleServer    = nullptr;
 BLEService*        pBlinkService = nullptr;
 BLECharacteristic* pBlinkChar    = nullptr;
@@ -142,7 +140,6 @@ class MyServerCallbacks : public BLEServerCallbacks {
   }
 };
 
-// ─── State ────────────────────────────────────────────────────────────────────
 unsigned long lastBlinkTime   = 0;
 unsigned long firstBlinkTime  = 0;
 unsigned long secondBlinkTime = 0;
@@ -154,7 +151,6 @@ bool          jawState             = false;
 
 unsigned long lastFocusSentTime = 0;
 
-// ─── Signal buffers ───────────────────────────────────────────────────────────
 // EEG envelope (blink detection)
 float envelopeBuffer[ENVELOPE_WINDOW_SIZE] = {0};
 int   envelopeIndex = 0;
@@ -175,10 +171,11 @@ __attribute__((aligned(16))) float y_cf[FFT_SIZE * 2];
 float *y1_cf = &y_cf[0];
 uint16_t fftIdx = 0;
 
-// ─── Filters ──────────────────────────────────────────────────────────────────
+// --- Filters ---
 // High-Pass Butterworth IIR digital filter, generated using filter_gen.py.
 // Sampling rate: 512.0 Hz, frequency: 5.0 Hz.
 // Filter is order 2, implemented as second-order sections (biquads).
+// Reference: https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.butter.html
 float highpass(float input)
 {
   float output = input;
@@ -194,6 +191,7 @@ float highpass(float input)
 // Band-Stop Butterworth IIR digital filter, generated using filter_gen.py.
 // Sampling rate: 512.0 Hz, frequency: [48.0, 52.0] Hz.
 // Filter is order 2, implemented as second-order sections (biquads).
+// Reference: https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.butter.html
 float Notch(float input)
 {
   float output = input;
@@ -215,6 +213,7 @@ float Notch(float input)
 // Low-Pass Butterworth IIR digital filter, generated using filter_gen.py.
 // Sampling rate: 512.0 Hz, frequency: 45.0 Hz.
 // Filter is order 2, implemented as second-order sections (biquads).
+// Reference: https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.butter.html
 float EEGFilter(float input)
 {
   float output = input;
@@ -227,22 +226,34 @@ float EEGFilter(float input)
   return output;
 }
 
-// High-Pass Butterworth IIR digital filter, generated using filter_gen.py.
-// Sampling rate: 500.0 Hz, frequency: 70.0 Hz. (used at 512 Hz — cutoff ~72 Hz, negligible difference)
-// Passes muscle artifact / jaw clench energy above 70 Hz.
-float jawClenchFilter(float input)
-{
-  float output = input;
-  {
-    static float z1, z2;
-    float x = output - -0.82523238f*z1 - 0.29463653f*z2;
-    output = 0.52996723f*x + -1.05993445f*z1 + 0.52996723f*z2;
-    z2 = z1; z1 = x;
-  }
-  return output;
-}
+// High-Pass Butterworth IIR digital filter
+// Sampling rate: 512.0 Hz, frequency: 70.0 Hz
+// Filter is order 2, implemented as second-order sections (biquads)
+// Reference: https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.butter.html
+class jawClenchFilter {
+private:
+    struct BiquadState { float z1 = 0, z2 = 0; };
+    BiquadState state0;
 
-// ─── Envelope ─────────────────────────────────────────────────────────────────
+public:
+    float process(float input) {
+        float output = input;
+
+        // Biquad section 0
+        float x0 = output - (-0.85080258f * state0.z1) - (0.30256882f * state0.z2);
+        output = 0.53834285f * x0 + -1.07668570f * state0.z1 + 0.53834285f * state0.z2;
+        state0.z2 = state0.z1;
+        state0.z1 = x0;
+
+        return output;
+    }
+
+    void reset() {
+        state0.z1 = state0.z2 = 0;
+    }
+};
+
+// --- Envelope ---
 float updateEEGEnvelope(float sample)
 {
   float a = fabs(sample);
@@ -263,7 +274,7 @@ float updateJawEnvelope(float sample)
   return jawEnvelopeSum / ENVELOPE_WINDOW_SIZE;
 }
 
-// ─── FFT / Band Power ─────────────────────────────────────────────────────────
+// --- FFT / Band Power ---
 BandpowerResults calculateBandpower(float *ps, float binRes, int halfSize)
 {
   BandpowerResults r = {0};
@@ -305,7 +316,7 @@ void processFFT()
   smoothBandpower(&raw, &smoothedPowers);
 }
 
-// ─── BLE helper ───────────────────────────────────────────────────────────────
+// --- BLE ---
 void sendCommand(uint8_t cmd)
 {
   if (clientConnected) {
@@ -315,7 +326,7 @@ void sendCommand(uint8_t cmd)
   Serial.print("CMD: "); Serial.println(cmd);
 }
 
-// ─── Setup ────────────────────────────────────────────────────────────────────
+// --- Setup ---
 void setup()
 {
   Serial.begin(BAUD_RATE);
@@ -349,7 +360,7 @@ void setup()
   Serial.println(">> BLE Advertising started");
 }
 
-// ─── Loop ─────────────────────────────────────────────────────────────────────
+// --- Loop ---
 void loop()
 {
   static unsigned long lastMicros = micros();
@@ -375,7 +386,7 @@ void loop()
 
   handleVibration();
 
-  // ── Jaw clench ─────────────────────────────────────────────────────────────
+  // jaw clench
   if (!jawState) {
     if (currentJawEnvelope > JAW_ON_THRESHOLD && (nowMs - lastJawClenchTime) >= JAW_DEBOUNCE_MS) {
       jawState             = true;
@@ -389,7 +400,7 @@ void loop()
     lastJawClenchTime = nowMs;
   }
 
-  // ── Blink detection (blocked right after a jaw clench) ─────────────────────
+  // blink detection - blocked right after a jaw clench
   if (!jawBlockActive) {
     if (currentEEGEnvelope > BLINK_THRESHOLD && (nowMs - lastBlinkTime) >= BLINK_DEBOUNCE_MS) {
       lastBlinkTime = nowMs;
@@ -424,7 +435,7 @@ void loop()
     }
   }
 
-  // ── Focus (beta band power, once per second while above threshold) ──────────
+  // focus - send every second while beta is above threshold
   float betaPct = (smoothedPowers.beta / (smoothedPowers.total + EPS)) * 100.0f;
   if (betaPct > FOCUS_BETA_PCT && (nowMs - lastFocusSentTime) >= FOCUS_INTERVAL_MS) {
     lastFocusSentTime = nowMs;
