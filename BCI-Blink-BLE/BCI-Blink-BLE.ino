@@ -402,9 +402,13 @@ void loop()
   }
 
   // blink detection - blocked right after a jaw clench
+  static bool blinkReady = true;
+  if (currentEEGEnvelope <= BLINK_THRESHOLD) blinkReady = true;
+
   bool jawBlockActive = (nowMs - lastJawDetectionTime) < JAW_BLOCK_DURATION_MS;
   if (!jawBlockActive) {
-    if (currentEEGEnvelope > BLINK_THRESHOLD && (nowMs - lastBlinkTime) >= BLINK_DEBOUNCE_MS) {
+    if (blinkReady && currentEEGEnvelope > BLINK_THRESHOLD && (nowMs - lastBlinkTime) >= BLINK_DEBOUNCE_MS) {
+      blinkReady = false;
       lastBlinkTime = nowMs;
       if (blinkCount == 0) {
         firstBlinkTime = nowMs;
