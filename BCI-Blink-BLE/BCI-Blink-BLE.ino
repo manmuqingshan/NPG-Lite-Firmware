@@ -69,17 +69,6 @@ unsigned long triple_blink_ms   = 600;
 bool betaEventFired = false;
 float BlinkThreshold = 50.0;
 
-// ----------------- CALIBRATION VARIABLES -----------------
-enum ProgramState { STATE_CALIBRATING, STATE_RUNNING };
-ProgramState programState = STATE_CALIBRATING;
-const unsigned long CALIBRATION_DURATION_MS = 10000; // 10 seconds
-unsigned long calibrationStartTime = 0;
-float maxBetaPct = 0.0;
-float betaThreshold = 0.0; // Will be set to 60% of maxBetaPct
-const float THRESHOLD_MULTIPLIER = 0.6;
-unsigned long lastBlinkUpdate = 0;
-unsigned long lastChaseUpdate = 0;
-int chasePosition = 0;  // Current position in LED chase
 
 class MyServerCallbacks : public BLEServerCallbacks {
   void onConnect(BLEServer* pServer) override {
@@ -201,12 +190,6 @@ void setup() {
   pixels.begin();
   pixels.clear();
   pixels.show();
-
-  // Start calibration
-  Serial.println("Starting calibration...");
-  programState = STATE_CALIBRATING;
-  calibrationStartTime = millis();
-  lastBlinkUpdate = millis();
 
   // --- BLE init ---
   BLEDevice::init("ESP32C6_EEG");                    // device name
