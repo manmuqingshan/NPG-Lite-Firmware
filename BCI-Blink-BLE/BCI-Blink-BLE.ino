@@ -350,7 +350,7 @@ void setup()
   esp_err_t err = dsps_fft2r_init_fc32(NULL, FFT_SIZE);
   if (err != ESP_OK) { Serial.println("FFT init failed"); while(1) delay(10); }
 
-  BLEDevice::init("ESP32C6_EEG");
+  BLEDevice::init("NPG-Lite-M2W");
   pBleServer = BLEDevice::createServer();
   pBleServer->setCallbacks(new MyServerCallbacks());
   pBlinkService = pBleServer->createService(BLINK_SERVICE_UUID);
