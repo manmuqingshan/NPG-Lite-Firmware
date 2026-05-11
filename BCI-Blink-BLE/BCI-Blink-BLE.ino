@@ -253,6 +253,8 @@ public:
     }
 };
 
+static jawClenchFilter jawFilter;
+
 // --- Envelope ---
 float updateEEGEnvelope(float sample)
 {
@@ -376,7 +378,7 @@ void loop()
     float eegLow   = EEGFilter(notched);
     float eeg      = highpass(eegLow);
     currentEEGEnvelope = updateEEGEnvelope(eeg);
-    currentJawEnvelope = updateJawEnvelope(jawClenchFilter(notched));
+    currentJawEnvelope = updateJawEnvelope(jawFilter.process(notched));
     inputBuffer[fftIdx] = eegLow;
     if (++fftIdx >= FFT_SIZE) { processFFT(); fftIdx = 0; }
   }
