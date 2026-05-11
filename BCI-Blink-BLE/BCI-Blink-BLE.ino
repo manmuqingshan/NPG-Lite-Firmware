@@ -384,7 +384,6 @@ void loop()
   }
 
   unsigned long nowMs = millis();
-  bool jawBlockActive = (nowMs - lastJawDetectionTime) < JAW_BLOCK_DURATION_MS;
 
   handleVibration();
 
@@ -403,6 +402,7 @@ void loop()
   }
 
   // blink detection - blocked right after a jaw clench
+  bool jawBlockActive = (nowMs - lastJawDetectionTime) < JAW_BLOCK_DURATION_MS;
   if (!jawBlockActive) {
     if (currentEEGEnvelope > BLINK_THRESHOLD && (nowMs - lastBlinkTime) >= BLINK_DEBOUNCE_MS) {
       lastBlinkTime = nowMs;
