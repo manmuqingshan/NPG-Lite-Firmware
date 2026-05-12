@@ -65,7 +65,7 @@ const int CH_R_BWD = 3;
 // PWM config
 const int PWM_FREQ = 25000;
 const int PWM_RES  = 8;
-const int PWM_MAX  = 200;
+const int PWM_MAX  = 220;
 
 // Soft-start ramp
 const int RAMP_START    = 220;
