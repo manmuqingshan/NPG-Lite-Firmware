@@ -74,7 +74,7 @@ This placement provides strong blink artifacts and jaw EMG coupling.
 
 ---
 
-## 3. OTA Mode & Web Configuration ( Firmware Only)
+## 3. OTA Mode & Web Configuration
 
 ### Entering OTA Mode
 
@@ -109,7 +109,7 @@ The web interface provides:
 
 ---
 
-## 4. Persistent Threshold Storage ( Firmware Only)
+## 4. Persistent Threshold Storage 
 
 All thresholds are saved to **ESP32 flash memory** (via `Preferences`) and automatically loaded on every boot. Thresholds survive power cycles and firmware-independent resets.
 
@@ -138,7 +138,7 @@ All thresholds are saved to **ESP32 flash memory** (via `Preferences`) and autom
 * Bandpower extraction:
 
   * Delta (0.5–4 Hz)
-  * Theta (4–8 Hz)V
+  * Theta (4–8 Hz)
   * Alpha (8–13 Hz)
   * **Beta (13–30 Hz)**
   * Gamma (30–45 Hz)
