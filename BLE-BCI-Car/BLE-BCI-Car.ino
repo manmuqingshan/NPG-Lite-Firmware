@@ -13,7 +13,7 @@
 
 // Copyright (c) 2025 Aman Maheshwari     - Aman@upsidedownlabs.tech
 // Copyright (c) 2024-2025 Krishnanshu Mittal - krishnanshu@upsidedownlabs.tech
-// Copyright (c) 2024-2025 Dee.pak Khatri      - deepak@upsidedownlabs.tech
+// Copyright (c) 2024-2025 Deepak Khatri      - deepak@upsidedownlabs.tech
 // Copyright (c) 2024-2025 Upside Down Labs   - contact@upsidedownlabs.tech
 
 // At Upside Down Labs, we create open-source DIY neuroscience hardware and software.
@@ -103,14 +103,14 @@ void updateSerialLock() {
   bool hostConnected = (bool)Serial;
 
   if (hostConnected && !serialLocked) {
-    serialLocked = true;
+    serialLocked  = true;
+    activeCommand = 255;   // reset so BLE resumes correctly after monitor closes
     stopMotors();
     Serial.println("[SERIAL LOCK] Serial Monitor detected - motor commands disabled.");
     Serial.println("Close Serial Monitor to enable BLE motor control.");
     printHelp();
   } else if (!hostConnected && serialLocked) {
     serialLocked = false;
-    // Serial Monitor is gone - cannot print
   }
 }
 
