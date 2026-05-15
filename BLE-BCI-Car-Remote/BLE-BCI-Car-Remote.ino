@@ -301,10 +301,10 @@ void printMacAddress() {
   // BLEDevice must be init'd before calling getAddress()
   String mac = BLEDevice::getAddress().toString().c_str();
   Serial.println("============================================");
-  Serial.println("  NPG Lite MAC Address (copy this value)   ");
+  Serial.println("  NPG Lite MAC Address (copy this line)   ");
   Serial.println("============================================");
-  Serial.println(mac);
-  Serial.println("Paste the MAC above into the car firmware  ");
+  Serial.println("Set MAC "+mac);
+  Serial.println("Paste the line above into the car firmware  ");
   Serial.println("when prompted, then reset the car.         ");
   Serial.println("============================================");
 }
