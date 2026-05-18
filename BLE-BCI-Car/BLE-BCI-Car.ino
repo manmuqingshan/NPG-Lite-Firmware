@@ -98,6 +98,7 @@ void printHelp();
 //  Lock follows actual connection state - no timeout needed.
 // ---------------------------------------------------------------
 bool serialLocked = false;
+uint32_t activeCommand = 255;
 
 void updateSerialLock() {
   bool hostConnected = (bool)Serial;
@@ -151,7 +152,6 @@ void stopMotors() {
 // ---------------------------------------------------------------
 //  Movement  (direct PWM write - no ramp)
 // ---------------------------------------------------------------
-uint32_t activeCommand = 255;
 
 void driveForward() {
   pwmWrite(PIN_L_BWD, 0);      pwmWrite(PIN_R_BWD, 0);
