@@ -30,15 +30,17 @@ This project turns the Neuro Playground Lite (NPG) into a hands-free mouse contr
 
 ## How To Use
 1. Attach the NPG and MPU6050 to a headband.
-2. Connect the MPU6050 to NPG via the QwiKK port.
-3. Wear the headband and power on NPG.
-4. Locate the `ESP32-BLE-Combo-main.zip` library file included in this sketch's directory.
+2. Connect the MPU6050 to NPG via the Qwiic port.
+3. Download the ESP32 BLE Combo library from [ESP32-BLE-Combo](https://github.com/upsidedownlabs/ESP32-BLE-Combo).
+4. Click **Code → Download ZIP** in the repository.
 5. Open Arduino IDE and go to **Sketch → Include Library → Add .ZIP Library...**.
-6. Select the provided `.zip` file and install it, then compile and upload the sketch normally.
-7. This is necessary as the `BleCombo.h` that is used in the code won't compile without including this zip library file.
-8. Calibrate by following vibration feedback.
-9. Move your head to control the mouse cursor.
-10. Blink twice for left click, three times for right click.
+6. Select the downloaded ZIP file and install it.
+7. This is required because the sketch uses the `BleCombo.h` library, which is not included with Arduino IDE by default.
+8. Compile and upload the sketch to your NPG Lite board.
+9. Wear the headband and power on NPG.
+10. Calibrate by following the vibration feedback.
+11. Move your head to control the mouse cursor.
+12. Blink twice for a left click and three times for a right click.
 
 ---
 
