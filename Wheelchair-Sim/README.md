@@ -4,6 +4,10 @@ A simple open-source firmware for **Neuro PlayGround Lite (NPG Lite)** by Upside
 
 ---
 
+## **[How to Use Wheelchair Simulator](#how-to-use)**
+
+
+
 ## What Does It Do?
 - Reads bio-potential signals from your face (eyes and jaw) using a single analog input (A0) on Neuro Playground Lite
 - Detects **left/right eye movement** and **jaw clench** (single/double)
@@ -115,11 +119,15 @@ Choose the value that matches your local powerline frequency, then re-upload the
 
 ---
 
-## Getting Started
+## How To Use
 1. Connect electrodes and BioAmp snap cables as shown in the image
-2. Flash the firmware to your NPG Lite board using a USB-C cable
-3. Pair with your computer/phone via Bluetooth (shows as "NPG Lite GAMING")
-4. Open a text editor or game and try the controls!
+2. Locate the `ESP32-BLE-Combo-main.zip` library file included in this sketch's directory.
+3. Open Arduino IDE and go to **Sketch → Include Library → Add .ZIP Library...**.
+4. Select the provided `.zip` file and install it, then compile and upload the sketch normally.
+5. This is necessary as the `BleCombo.h` that is used in the code won't compile without including this zip library file.
+6. Flash the firmware to your NPG Lite board using a USB-C cable
+7. Pair with your computer/phone via Bluetooth (shows as "NPG Lite GAMING")
+8. Open a text editor or game and try the controls!
 
 ---
 
