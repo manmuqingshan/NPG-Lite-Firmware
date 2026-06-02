@@ -123,8 +123,8 @@ Choose the value that matches your local powerline frequency, then re-upload the
 1. Connect electrodes and BioAmp snap cables as shown in the image.
 2. Download the ESP32 BLE Combo library from the following repository:
    - [ESP32-BLE-Combo](https://github.com/upsidedownlabs/ESP32-BLE-Combo)
-3. Click **Code → Download ZIP** and save the library ZIP file to your computer.
-4. Open Arduino IDE and go to **Sketch → Include Library → Add .ZIP Library...**.
+3. Click **`Code` → `Download ZIP`** and save the library ZIP file to your computer.
+4. Open Arduino IDE and go to **`Sketch` → `Include Library` → `Add .ZIP Library...`**.
 5. Select the downloaded ZIP file and install it.
 6. This step is required because the sketch uses the `BleCombo.h` library, which is not included with Arduino IDE by default.
 7. Flash the firmware to your NPG Lite board using a USB-C cable.

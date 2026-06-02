@@ -31,8 +31,8 @@ This project turns the Neuro Playground Lite (NPG) into a hands-free mouse contr
 1. Attach the NPG and BMI270 to a headband.
 2. Connect the BMI270 to NPG via the Qwiic port.
 3. Download the ESP32 BLE Combo library from [ESP32-BLE-Combo](https://github.com/upsidedownlabs/ESP32-BLE-Combo).
-4. Click **Code → Download ZIP** in the repository.
-5. Open Arduino IDE and go to **Sketch → Include Library → Add .ZIP Library...**.
+4. Click **`Code` → `Download ZIP`** in the repository.
+5. Open Arduino IDE and go to **`Sketch` → `Include Library` → `Add .ZIP Library...`**.
 6. Select the downloaded ZIP file and install it.
 7. This is required because the sketch uses the `BleCombo.h` library, which is not included with Arduino IDE by default.
 8. Compile and upload the sketch to your NPG Lite board.
