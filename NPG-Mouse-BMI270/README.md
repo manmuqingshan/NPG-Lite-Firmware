@@ -6,11 +6,11 @@ This project turns the Neuro Playground Lite (NPG) into a hands-free mouse contr
 
 ## What It Does
 - **Head Movement → Mouse Movement:**
-  - The BMI270 sensor (gyro + accelerometer) is attached to the headband and connected to NPG via the QwiKK port.
+  - The BMI270 sensor (gyro + accelerometer) is attached to the headband and connected to NPG via the Qwiic port.
   - Moving your head up/down or left/right moves the mouse cursor on your computer.
-- **Blink Detection & jaw clench → Mouse Clicks:**
+- **Blink Detection & Jaw Clench → Mouse Clicks:**
   - NPG reads single-channel EOG data.
-  - jaw clench triggers a left mouse click.
+  - Jaw clench triggers a left mouse click.
   - Triple blinks triggers a right mouse click.
 
 ## How It Works
