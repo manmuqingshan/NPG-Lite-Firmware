@@ -17,7 +17,7 @@ A simple open-source firmware for **Neuro PlayGround Lite (NPG Lite)** by Upside
 ---
 
 ## Hardware Requirements
-- **NPG Lite(Any pack)**
+- **NPG Lite (Any pack)**
 - **USB-C cable** 
 - **3 Gel Electrodes**
 - **3 BioAmp Snap Cables**
@@ -121,10 +121,9 @@ Choose the value that matches your local powerline frequency, then re-upload the
 
 ## How To Use
 1. Connect electrodes and BioAmp snap cables as shown in the image.
-2. Download the ESP32 BLE Combo library from the following repository:
-   - [ESP32-BLE-Combo](https://github.com/upsidedownlabs/ESP32-BLE-Combo)
-3. Click **`Code` → `Download ZIP`** and save the library ZIP file to your computer.
-4. Open Arduino IDE and go to **`Sketch` → `Include Library` → `Add .ZIP Library...`**.
+2. Download the ESP32 BLE Combo library as a `.zip` file from [ESP32-BLE-Combo](https://github.com/upsidedownlabs/ESP32-BLE-Combo).
+3. When you click the link, you will be taken to the GitHub repository of ESP32-BLE-Combo. You will see a green button which says `<> Code`. Press that button. A dropdown window appears. At the bottom of that window, there is a button which says `Download ZIP`. Press that button. Now all the files in that repository are downloaded as a `.zip` file.
+4. Open Arduino IDE. Now at the top there is a horizontal bar. Click on **`Sketch` → `Include Library` → `Add .ZIP Library...`**.
 5. Select the downloaded ZIP file and install it.
 6. This step is required because the sketch uses the `BleCombo.h` library, which is not included with Arduino IDE by default.
 7. Flash the firmware to your NPG Lite board using a USB-C cable.
