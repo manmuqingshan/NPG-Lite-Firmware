@@ -4,6 +4,10 @@ A simple open-source firmware for **Neuro PlayGround Lite (NPG Lite)** by Upside
 
 ---
 
+## **[How to Use Wheelchair Simulator](#how-to-use)**
+
+
+
 ## What Does It Do?
 - Reads bio-potential signals from your face (eyes and jaw) using a single analog input (A0) on Neuro Playground Lite
 - Detects **left/right eye movement** and **jaw clench** (single/double)
@@ -13,7 +17,7 @@ A simple open-source firmware for **Neuro PlayGround Lite (NPG Lite)** by Upside
 ---
 
 ## Hardware Requirements
-- **NPG Lite(Any pack)**
+- **NPG Lite (Any pack)**
 - **USB-C cable** 
 - **3 Gel Electrodes**
 - **3 BioAmp Snap Cables**
@@ -115,11 +119,26 @@ Choose the value that matches your local powerline frequency, then re-upload the
 
 ---
 
-## Getting Started
-1. Connect electrodes and BioAmp snap cables as shown in the image
-2. Flash the firmware to your NPG Lite board using a USB-C cable
-3. Pair with your computer/phone via Bluetooth (shows as "NPG Lite GAMING")
-4. Open a text editor or game and try the controls!
+## How To Use
+1. Connect electrodes and BioAmp snap cables as shown in the image.
+2. Install the `BleCombo.h` library using the [Library Installation](#library-installation) section below for instructions.
+3. Flash the firmware to your NPG Lite board using a USB-C cable.
+4. Pair with your computer/phone via Bluetooth (shows as **"NPG Lite GAMING"**).
+
+---
+
+## Library Installation
+
+> For a full visual guide covering both the ZIP method and Library Manager method, refer to:
+> **[Installing Arduino Library](https://docs.upsidedownlabs.tech/guides/usage-guides/arduino-library-from-github/index.html)**
+
+The sketch uses the `BleCombo.h` library from [ESP32-BLE-Combo](https://github.com/upsidedownlabs/ESP32-BLE-Combo), which is not included with Arduino IDE by default. Follow the steps below to install it:
+
+1. Open the [ESP32-BLE-Combo](https://github.com/upsidedownlabs/ESP32-BLE-Combo) GitHub repository.
+2. Click the green `<> Code` button. In the dropdown, click `Download ZIP`.
+3. Open Arduino IDE. Click on **`Sketch` → `Include Library` → `Add .ZIP Library...`**.
+4. Select the downloaded ZIP file and install it.
+5. In case of any issue, refer to the library installation guide provided above.
 
 ---
 
