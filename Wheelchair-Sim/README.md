@@ -121,13 +121,24 @@ Choose the value that matches your local powerline frequency, then re-upload the
 
 ## How To Use
 1. Connect electrodes and BioAmp snap cables as shown in the image.
-2. Download the ESP32 BLE Combo library as a `.zip` file from [ESP32-BLE-Combo](https://github.com/upsidedownlabs/ESP32-BLE-Combo).
-3. When you click the link, you will be taken to the GitHub repository of ESP32-BLE-Combo. You will see a green button which says `<> Code`. Press that button. A dropdown window appears. At the bottom of that window, there is a button which says `Download ZIP`. Press that button. Now all the files in that repository are downloaded as a `.zip` file.
-4. Open Arduino IDE. Now at the top there is a horizontal bar. Click on **`Sketch` → `Include Library` → `Add .ZIP Library...`**.
-5. Select the downloaded ZIP file and install it.
-6. This step is required because the sketch uses the `BleCombo.h` library, which is not included with Arduino IDE by default.
-7. Flash the firmware to your NPG Lite board using a USB-C cable.
-8. Pair with your computer/phone via Bluetooth (shows as **"NPG Lite GAMING"**).
+2. Install the `BleCombo.h` library using the [Library Installation](#library-installation) section below for instructions.
+3. Flash the firmware to your NPG Lite board using a USB-C cable.
+4. Pair with your computer/phone via Bluetooth (shows as **"NPG Lite GAMING"**).
+
+---
+
+## Library Installation
+
+> For a full visual guide covering both the ZIP method and Library Manager method, refer to:
+> **[Installing Arduino Library](https://docs.upsidedownlabs.tech/guides/usage-guides/arduino-library-from-github/index.html)**
+
+The sketch uses the `BleCombo.h` library from [ESP32-BLE-Combo](https://github.com/upsidedownlabs/ESP32-BLE-Combo), which is not included with Arduino IDE by default. Follow the steps below to install it:
+
+1. Open the [ESP32-BLE-Combo](https://github.com/upsidedownlabs/ESP32-BLE-Combo) GitHub repository.
+2. Click the green `<> Code` button. In the dropdown, click `Download ZIP`.
+3. Open Arduino IDE. Click on **`Sketch` → `Include Library` → `Add .ZIP Library...`**.
+4. Select the downloaded ZIP file and install it.
+5. In case of any issue, refer to the library installation guide provided above.
 
 ---
 
