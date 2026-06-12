@@ -27,26 +27,28 @@ Adafruit_MPU6050 mpu;
 
 // ———— CONFIG ————
 // Invert if an axis feels backwards:
-const float INV_X =  1.0;  // +1 = normal, –1 = flip X
-const float INV_Y =  1.0;  // +1 = normal, –1 = flip Y
-const float INV_Z =  1.0;  // +1 = normal, –1 = flip Z
+const float INV_X = 1.0; // +1 = normal, –1 = flip X
+const float INV_Y = 1.0; // +1 = normal, –1 = flip Y
+const float INV_Z = 1.0; // +1 = normal, –1 = flip Z
 
 // How many samples to take for your “zero” calibration:
-const int   CAL_SAMPLES = 200;
-const float CAL_DELAY_MS = 5.0;  // wait between reads
+const int CAL_SAMPLES = 200;
+const float CAL_DELAY_MS = 5.0; // wait between reads
 
 // These will be filled in by calibrateOffsets():
 float offsetX = 0.0;
 float offsetY = 0.0;
 float offsetZ = 0.0;
 
-void calibrateOffsets() {
+void calibrateOffsets()
+{
   float sumX = 0, sumY = 0, sumZ = 0;
   sensors_event_t a, g, temp;
 
   Serial.println("Calibrating… keep the board perfectly level and still");
 
-  for (int i = 0; i < CAL_SAMPLES; i++) {
+  for (int i = 0; i < CAL_SAMPLES; i++)
+  {
     mpu.getEvent(&a, &g, &temp);
     sumX += a.acceleration.x;
     sumY += a.acceleration.y;
@@ -66,16 +68,23 @@ void calibrateOffsets() {
   Serial.println("Calibration done!");
 }
 
-void setup() {
+void setup()
+{
   Wire.begin();
   Wire.setClock(400000);
 
   Serial.begin(230400);
-  while (!Serial) {}  // wait for USB‑Serial
+  while (!Serial)
+  {
+  } // wait for USB‑Serial
 
-  if (!mpu.begin()) {
+  if (!mpu.begin())
+  {
     Serial.println("MPU not found!");
-    while (1) { delay(10); }
+    while (1)
+    {
+      delay(10);
+    }
   }
 
   mpu.setFilterBandwidth(MPU6050_BAND_260_HZ);
@@ -86,7 +95,8 @@ void setup() {
   calibrateOffsets();
 }
 
-void loop() {
+void loop()
+{
   sensors_event_t a, g, temp;
   mpu.getEvent(&a, &g, &temp);
 

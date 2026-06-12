@@ -36,35 +36,36 @@
 #include "esp_dsp.h"
 
 // ----------------- USER CONFIGURATION -----------------
-#define SAMPLE_RATE       512           // samples per second
-#define FFT_SIZE          512           // must be a power of two
-#define BAUD_RATE         115200
-#define INPUT_PIN         A0
+#define SAMPLE_RATE 512 // samples per second
+#define FFT_SIZE 512    // must be a power of two
+#define BAUD_RATE 115200
+#define INPUT_PIN A0
 
 // EEG bands (Hz)
-#define DELTA_LOW    0.5f
-#define DELTA_HIGH   4.0f
-#define THETA_LOW    4.0f
-#define THETA_HIGH   8.0f
-#define ALPHA_LOW    8.0f
-#define ALPHA_HIGH   13.0f
-#define BETA_LOW     13.0f
-#define BETA_HIGH    30.0f
-#define GAMMA_LOW    30.0f
-#define GAMMA_HIGH   45.0f
+#define DELTA_LOW 0.5f
+#define DELTA_HIGH 4.0f
+#define THETA_LOW 4.0f
+#define THETA_HIGH 8.0f
+#define ALPHA_LOW 8.0f
+#define ALPHA_HIGH 13.0f
+#define BETA_LOW 13.0f
+#define BETA_HIGH 30.0f
+#define GAMMA_LOW 30.0f
+#define GAMMA_HIGH 45.0f
 
 #define SMOOTHING_FACTOR 0.63f
-#define EPS              1e-7f
+#define EPS 1e-7f
 
 // ----------------- BUFFERS & TYPES -----------------
 float inputBuffer[FFT_SIZE];
-float powerSpectrum[FFT_SIZE/2];
+float powerSpectrum[FFT_SIZE / 2];
 
 // For two-real FFT trick
 __attribute__((aligned(16))) float y_cf[FFT_SIZE * 2];
 float *y1_cf = &y_cf[0];
 
-typedef struct {
+typedef struct
+{
   float delta, theta, alpha, beta, gamma, total;
 } BandpowerResults;
 
@@ -80,15 +81,15 @@ float Notch(float input)
   float output = input;
   {
     static float z1, z2; // filter section state
-    float x = output - -1.58696045*z1 - 0.96505858*z2;
-    output = 0.96588529*x + -1.57986211*z1 + 0.96588529*z2;
+    float x = output - -1.58696045 * z1 - 0.96505858 * z2;
+    output = 0.96588529 * x + -1.57986211 * z1 + 0.96588529 * z2;
     z2 = z1;
     z1 = x;
   }
   {
     static float z1, z2; // filter section state
-    float x = output - -1.62761184*z1 - 0.96671306*z2;
-    output = 1.00000000*x + -1.63566226*z1 + 1.00000000*z2;
+    float x = output - -1.62761184 * z1 - 0.96671306 * z2;
+    output = 1.00000000 * x + -1.63566226 * z1 + 1.00000000 * z2;
     z2 = z1;
     z1 = x;
   }
@@ -104,8 +105,8 @@ float EEGFilter(float input)
   float output = input;
   {
     static float z1, z2; // filter section state
-    float x = output - -1.24200128*z1 - 0.45885207*z2;
-    output = 0.05421270*x + 0.10842539*z1 + 0.05421270*z2;
+    float x = output - -1.24200128 * z1 - 0.45885207 * z2;
+    output = 0.05421270 * x + 0.10842539 * z1 + 0.05421270 * z2;
     z2 = z1;
     z1 = x;
   }
@@ -113,46 +114,59 @@ float EEGFilter(float input)
 }
 
 // ----------------- BANDPOWER & SMOOTHING -----------------
-BandpowerResults calculateBandpower(float *ps, float binRes, int halfSize) {
+BandpowerResults calculateBandpower(float *ps, float binRes, int halfSize)
+{
   BandpowerResults r = {0};
-  for(int i=1; i<halfSize; i++){
+  for (int i = 1; i < halfSize; i++)
+  {
     float freq = i * binRes;
-    float p    = ps[i];
-    r.total   += p;
-         if(freq>=DELTA_LOW && freq<DELTA_HIGH)  r.delta += p;
-    else if(freq>=THETA_LOW && freq<THETA_HIGH)  r.theta += p;
-    else if(freq>=ALPHA_LOW && freq<ALPHA_HIGH)  r.alpha += p;
-    else if(freq>=BETA_LOW  && freq<BETA_HIGH)   r.beta  += p;
-    else if(freq>=GAMMA_LOW && freq<GAMMA_HIGH)  r.gamma += p;
+    float p = ps[i];
+    r.total += p;
+    if (freq >= DELTA_LOW && freq < DELTA_HIGH)
+      r.delta += p;
+    else if (freq >= THETA_LOW && freq < THETA_HIGH)
+      r.theta += p;
+    else if (freq >= ALPHA_LOW && freq < ALPHA_HIGH)
+      r.alpha += p;
+    else if (freq >= BETA_LOW && freq < BETA_HIGH)
+      r.beta += p;
+    else if (freq >= GAMMA_LOW && freq < GAMMA_HIGH)
+      r.gamma += p;
   }
   return r;
 }
 
-void smoothBandpower(const BandpowerResults *raw, BandpowerResults *s) {
-  s->delta = SMOOTHING_FACTOR*raw->delta + (1-SMOOTHING_FACTOR)*s->delta;
-  s->theta = SMOOTHING_FACTOR*raw->theta + (1-SMOOTHING_FACTOR)*s->theta;
-  s->alpha = SMOOTHING_FACTOR*raw->alpha + (1-SMOOTHING_FACTOR)*s->alpha;
-  s->beta  = SMOOTHING_FACTOR*raw->beta  + (1-SMOOTHING_FACTOR)*s->beta;
-  s->gamma = SMOOTHING_FACTOR*raw->gamma + (1-SMOOTHING_FACTOR)*s->gamma;
-  s->total = SMOOTHING_FACTOR*raw->total + (1-SMOOTHING_FACTOR)*s->total;
+void smoothBandpower(const BandpowerResults *raw, BandpowerResults *s)
+{
+  s->delta = SMOOTHING_FACTOR * raw->delta + (1 - SMOOTHING_FACTOR) * s->delta;
+  s->theta = SMOOTHING_FACTOR * raw->theta + (1 - SMOOTHING_FACTOR) * s->theta;
+  s->alpha = SMOOTHING_FACTOR * raw->alpha + (1 - SMOOTHING_FACTOR) * s->alpha;
+  s->beta = SMOOTHING_FACTOR * raw->beta + (1 - SMOOTHING_FACTOR) * s->beta;
+  s->gamma = SMOOTHING_FACTOR * raw->gamma + (1 - SMOOTHING_FACTOR) * s->gamma;
+  s->total = SMOOTHING_FACTOR * raw->total + (1 - SMOOTHING_FACTOR) * s->total;
 }
 
 // ----------------- DSP FFT SETUP -----------------
-void initFFT() {
+void initFFT()
+{
   // initialize esp-dsp real-FFT (two-real trick)
   esp_err_t err = dsps_fft2r_init_fc32(NULL, FFT_SIZE);
-  if(err != ESP_OK){
+  if (err != ESP_OK)
+  {
     Serial.println("FFT init failed");
-    while(1) delay(10);
+    while (1)
+      delay(10);
   }
 }
 
 // ----------------- FFT + BANDPOWER + PEAK -----------------
-void processFFT() {
+void processFFT()
+{
   // pack real→complex: real=inputBuffer, imag=0
-  for(int i=0; i<FFT_SIZE; i++){
-    y_cf[2*i]   = inputBuffer[i];
-    y_cf[2*i+1] = 0.0f;
+  for (int i = 0; i < FFT_SIZE; i++)
+  {
+    y_cf[2 * i] = inputBuffer[i];
+    y_cf[2 * i + 1] = 0.0f;
   }
 
   // FFT
@@ -161,57 +175,72 @@ void processFFT() {
   dsps_cplx2reC_fc32(y_cf, FFT_SIZE);
 
   // magnitude² spectrum
-  int half = FFT_SIZE/2;
-  for(int i=0; i<half; i++){
-    float re = y1_cf[2*i];
-    float im = y1_cf[2*i+1];
-    powerSpectrum[i] = re*re + im*im;
+  int half = FFT_SIZE / 2;
+  for (int i = 0; i < half; i++)
+  {
+    float re = y1_cf[2 * i];
+    float im = y1_cf[2 * i + 1];
+    powerSpectrum[i] = re * re + im * im;
   }
 
   // detect peak bin (skip i=0)
   int maxIdx = 1;
   float maxP = powerSpectrum[1];
-  for(int i=2; i<half; i++){
-    if(powerSpectrum[i] > maxP){
+  for (int i = 2; i < half; i++)
+  {
+    if (powerSpectrum[i] > maxP)
+    {
       maxP = powerSpectrum[i];
       maxIdx = i;
     }
   }
-  float binRes = float(SAMPLE_RATE)/FFT_SIZE;
+  float binRes = float(SAMPLE_RATE) / FFT_SIZE;
   float peakHz = maxIdx * binRes;
 
   // bandpower & smoothing
   BandpowerResults raw = calculateBandpower(powerSpectrum, binRes, half);
   smoothBandpower(&raw, &smoothedPowers);
-  float T = smoothedPowers.total + EPS;  // Total Bandpower
+  float T = smoothedPowers.total + EPS; // Total Bandpower
 
-  if(((smoothedPowers.beta/ T)*100)>20.0)
+  if (((smoothedPowers.beta / T) * 100) > 20.0)
   {
     digitalWrite(7, HIGH);
-  } else {
+  }
+  else
+  {
     digitalWrite(7, LOW);
   }
 
   // print: delta%, theta%, alpha%, beta%, gamma%, peakHz
-  Serial.print((smoothedPowers.delta/T)*100, 1); Serial.print(',');
-  Serial.print((smoothedPowers.theta/T)*100, 1); Serial.print(',');
-  Serial.print((smoothedPowers.alpha/T)*100, 1); Serial.print(',');
-  Serial.print((smoothedPowers.beta/ T)*100, 1); Serial.print(',');
-  Serial.print((smoothedPowers.gamma/T)*100, 1); Serial.print(',');
+  Serial.print((smoothedPowers.delta / T) * 100, 1);
+  Serial.print(',');
+  Serial.print((smoothedPowers.theta / T) * 100, 1);
+  Serial.print(',');
+  Serial.print((smoothedPowers.alpha / T) * 100, 1);
+  Serial.print(',');
+  Serial.print((smoothedPowers.beta / T) * 100, 1);
+  Serial.print(',');
+  Serial.print((smoothedPowers.gamma / T) * 100, 1);
+  Serial.print(',');
   Serial.println(peakHz, 1);
 }
 
 // ----------------- SETUP & LOOP -----------------
-void setup() {
+void setup()
+{
   Serial.begin(BAUD_RATE);
-  while(!Serial) { delay(1); }
+  while (!Serial)
+  {
+    delay(1);
+  }
   pinMode(INPUT_PIN, INPUT);
   pinMode(7, OUTPUT);
 
   initFFT();
 }
 
-void loop() {
+void loop()
+{
   static uint16_t idx = 0;
   static unsigned long lastMicros = micros();
   unsigned long now = micros(), dt = now - lastMicros;
@@ -219,14 +248,16 @@ void loop() {
 
   static long timer = 0;
   timer -= dt;
-  if(timer <= 0){
+  if (timer <= 0)
+  {
     timer += 1000000L / SAMPLE_RATE;
     int raw = analogRead(INPUT_PIN);
     float filt = EEGFilter(Notch(raw));
     inputBuffer[idx++] = filt;
   }
 
-  if(idx >= FFT_SIZE){
+  if (idx >= FFT_SIZE)
+  {
     processFFT();
     idx = 0;
   }

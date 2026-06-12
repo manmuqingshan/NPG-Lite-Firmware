@@ -15,6 +15,7 @@
 // Copyright (c) 2024-2025 Krishnanshu Mittal - krishnanshu@upsidedownlabs.tech
 // Copyright (c) 2024-2025 Deepak Khatri      - deepak@upsidedownlabs.tech
 // Copyright (c) 2024-2025 Upside Down Labs   - contact@upsidedownlabs.tech
+// Copyright (c) 2026 Varun Patil - vap05072006@gmail.com
 //
 // At Upside Down Labs, we create open-source DIY neuroscience hardware and software.
 // Our mission is to make neuroscience affordable and accessible for everyone.
@@ -39,38 +40,42 @@
 // ---------------------------------------------------------------
 //  BLE UUIDs
 // ---------------------------------------------------------------
-#define SERVICE_UUID           "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
-#define CHARACTERISTIC_UUID_1  "beb5483e-36e1-4688-b7f5-ea07361b26a8"
-#define CHARACTERISTIC_UUID_2  "1c95d5e3-d8f7-413a-bf3d-7a2e5d7be87e"
+#define SERVICE_UUID "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
+#define CHARACTERISTIC_UUID_1 "beb5483e-36e1-4688-b7f5-ea07361b26a8"
+#define CHARACTERISTIC_UUID_2 "1c95d5e3-d8f7-413a-bf3d-7a2e5d7be87e"
 
 // ---------------------------------------------------------------
 //  Hardware pins
 // ---------------------------------------------------------------
-#define PIN_NEOPIXEL  15
-#define PIN_LED_VIB    7   // NPG Lite: shared LED + vibration motor
+#define PIN_NEOPIXEL 15
+#define PIN_LED_VIB 7  // NPG Lite: shared LED + vibration motor
 
 Adafruit_NeoPixel pixel(6, PIN_NEOPIXEL, NEO_GRB + NEO_KHZ800);
+#define BLE_LED 0
+#define BATTERY_LED 5
 
 // ---------------------------------------------------------------
 //  Signal processing config
 // ---------------------------------------------------------------
-#define SAMPLE_RATE   512
-#define FFT_SIZE      512
-#define BAUD_RATE     115200
-#define INPUT_PIN1    A0   // EEG
-#define INPUT_PIN2    A1   // Left EMG
-#define INPUT_PIN3    A2   // Right EMG
+#define SAMPLE_RATE 512
+#define FFT_SIZE 512
+#define BAUD_RATE 115200
+#define INPUT_PIN1 A0           // EEG
+#define INPUT_PIN2 A1           // Left EMG
+#define INPUT_PIN3 A2           // Right EMG
+#define BATTERY_VOLTAGE_PIN A6  // Battery connected ADC
+#define BLUE_LED_DURATION 100
 
-#define DELTA_LOW   0.5f
-#define DELTA_HIGH  4.0f
-#define THETA_LOW   4.0f
-#define THETA_HIGH  8.0f
-#define ALPHA_LOW   8.0f
-#define ALPHA_HIGH  13.0f
-#define BETA_LOW    13.0f
-#define BETA_HIGH   30.0f
-#define GAMMA_LOW   30.0f
-#define GAMMA_HIGH  45.0f
+#define DELTA_LOW 0.5f
+#define DELTA_HIGH 4.0f
+#define THETA_LOW 4.0f
+#define THETA_HIGH 8.0f
+#define ALPHA_LOW 8.0f
+#define ALPHA_HIGH 13.0f
+#define BETA_LOW 13.0f
+#define BETA_HIGH 30.0f
+#define GAMMA_LOW 30.0f
+#define GAMMA_HIGH 45.0f
 #define SMOOTHING_FACTOR 0.63f
 #define EPS 1e-7f
 
@@ -93,28 +98,39 @@ Preferences prefs;
 //  Globals shared between loop() and debug
 // ---------------------------------------------------------------
 float gBetaPct = 0.0f;
-float gEnv1    = 0.0f;
-float gEnv2    = 0.0f;
-bool  debugEnabled = false;
+float gEnv1 = 0.0f;
+float gEnv2 = 0.0f;
+bool debugEnabled = false;
+static bool pixelDirty = false;
 
 // ---------------------------------------------------------------
 //  BLE objects
 // ---------------------------------------------------------------
-BLEServer         *pServer           = NULL;
+BLEServer *pServer = NULL;
 BLECharacteristic *pCharacteristic_1 = NULL;
 BLECharacteristic *pCharacteristic_2 = NULL;
-BLEDescriptor     *pDescr_1;
-BLE2902           *pBLE2902_1;
-BLE2902           *pBLE2902_2;
+BLEDescriptor *pDescr_1;
+BLE2902 *pBLE2902_1;
+BLE2902 *pBLE2902_2;
 
-bool deviceConnected    = false;
+bool deviceConnected = false;
 bool oldDeviceConnected = false;
 
 // ---------------------------------------------------------------
 //  Control state
 // ---------------------------------------------------------------
-bool     isGoingBackward = false;
-uint32_t lastSentCmd     = 255;
+bool isGoingBackward = false;
+uint32_t lastSentCmd = 255;
+
+// ── BLE LED state machine ──
+enum LedState {
+  LED_RED,
+  LED_GREEN,
+  LED_BLUE_FADE
+};
+LedState ledState = LED_RED;
+unsigned long lastCmdSentMs = 0;
+uint32_t lastPixel0Color = 0xFFFFFFFF;
 
 // ---------------------------------------------------------------
 //  DSP buffers
@@ -124,10 +140,78 @@ float powerSpectrum[FFT_SIZE / 2];
 __attribute__((aligned(16))) float y_cf[FFT_SIZE * 2];
 float *y1_cf = &y_cf[0];
 
-typedef struct {
+typedef struct
+{
   float delta, theta, alpha, beta, gamma, total;
 } BandpowerResults;
 BandpowerResults smoothedPowers = { 0, 0, 0, 0, 0, 0 };
+
+// ---------------------------------------------------------------
+//  Battery level indication
+// ---------------------------------------------------------------
+static const unsigned long BATTERY_CHECK_INTERVAL = 10000;  // Interval in milliseconds
+static unsigned long lastBatteryCheck = 0;
+
+uint32_t batteryColor = 0;  // stored battery LED color
+static uint32_t batteryWinSum = 0;
+static uint16_t batteryWinCount = 0;
+static int lastBatteryPct = -1;
+static uint8_t risingCount = 0;
+static const uint8_t RISING_THRESHOLD = 3;
+const float voltageLUT[] = {
+  3.27, 3.61, 3.69, 3.71, 3.73, 3.75, 3.77, 3.79, 3.80, 3.82,
+  3.84, 3.85, 3.87, 3.91, 3.95, 3.98, 4.02, 4.08, 4.11, 4.15, 4.20
+};
+
+const int percentLUT[] = {
+  0, 5, 10, 15, 20, 25, 30, 35, 40, 45,
+  50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100
+};
+
+const int lutSize = sizeof(voltageLUT) / sizeof(voltageLUT[0]);
+
+// Interpolation function
+float interpolatePercentage(float voltage) {
+  // Handle out-of-range voltages
+  if (voltage <= voltageLUT[0])
+    return 0;
+  if (voltage >= voltageLUT[lutSize - 1])
+    return 100;
+
+  // Find the nearest LUT entries
+  int i = 0;
+  while (i < lutSize - 1 && voltage > voltageLUT[i + 1])
+    i++;
+
+  // Interpolate
+  float v1 = voltageLUT[i], v2 = voltageLUT[i + 1];
+  int p1 = percentLUT[i], p2 = percentLUT[i + 1];
+  return p1 + (voltage - v1) * (p2 - p1) / (v2 - v1);
+}
+
+int getCurrentBatteryPercentage() {
+  float avgRaw = (batteryWinCount > 0) ? (batteryWinSum / batteryWinCount) : analogRead(BATTERY_VOLTAGE_PIN);
+  batteryWinSum = 0;
+  batteryWinCount = 0;
+  float voltage = (avgRaw / 1000.0) * 2;
+  voltage += 0.022;
+  float percentage = interpolatePercentage(voltage);
+  if (lastBatteryPct == -1) {
+    lastBatteryPct = (int)percentage;
+  } else if ((int)percentage < lastBatteryPct) {
+    lastBatteryPct = (int)percentage;
+    risingCount = 0;
+  } else if ((int)percentage > lastBatteryPct) {
+    risingCount++;
+    if (risingCount >= RISING_THRESHOLD) {
+      lastBatteryPct = (int)percentage;
+      risingCount = 0;
+    }
+  } else {
+    risingCount = 0;
+  }
+  return lastBatteryPct;
+}
 
 // ----------------- NOTCH FILTER CLASSES -----------------
 // For 50Hz AC noise removal
@@ -136,19 +220,26 @@ BandpowerResults smoothedPowers = { 0, 0, 0, 0, 0, 0 };
 // Filter is order 2, implemented as second-order sections (biquads).
 // Reference: https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.butter.html
 class NotchFilter {
-  struct BiquadState { float z1 = 0, z2 = 0; };
+  struct BiquadState {
+    float z1 = 0, z2 = 0;
+  };
   BiquadState s1, s2;
+
 public:
   float process(float in) {
-    float x   = in - (-1.56858163f * s1.z1) - (0.96424138f * s1.z2);
-    float out  = 0.96508099f * x + (-1.56202714f * s1.z1) + (0.96508099f * s1.z2);
-    s1.z2 = s1.z1; s1.z1 = x;
-    x   = out - (-1.61100358f * s2.z1) - (0.96592171f * s2.z2);
-    out = 1.0f   * x + (-1.61854514f * s2.z1) + (1.0f * s2.z2);
-    s2.z2 = s2.z1; s2.z1 = x;
+    float x = in - (-1.56858163f * s1.z1) - (0.96424138f * s1.z2);
+    float out = 0.96508099f * x + (-1.56202714f * s1.z1) + (0.96508099f * s1.z2);
+    s1.z2 = s1.z1;
+    s1.z1 = x;
+    x = out - (-1.61100358f * s2.z1) - (0.96592171f * s2.z2);
+    out = 1.0f * x + (-1.61854514f * s2.z1) + (1.0f * s2.z2);
+    s2.z2 = s2.z1;
+    s2.z1 = x;
     return out;
   }
-  void reset() { s1.z1 = s1.z2 = s2.z1 = s2.z2 = 0; }
+  void reset() {
+    s1.z1 = s1.z2 = s2.z1 = s2.z2 = 0;
+  }
 };
 
 // ----------------- EMG FILTER CLASSES -----------------
@@ -159,14 +250,18 @@ public:
 
 class EMGHighPassFilter {
   double z1 = 0, z2 = 0;
+
 public:
   double process(double in) {
-    double x   = in - (-0.82523238) * z1 - (0.29463653) * z2;
-    double out  = 0.52996723 * x + (-1.05993445) * z1 + 0.52996723 * z2;
-    z2 = z1; z1 = x;
+    double x = in - (-0.82523238) * z1 - (0.29463653) * z2;
+    double out = 0.52996723 * x + (-1.05993445) * z1 + 0.52996723 * z2;
+    z2 = z1;
+    z1 = x;
     return out;
   }
-  void reset() { z1 = z2 = 0; }
+  void reset() {
+    z1 = z2 = 0;
+  }
 };
 
 // ---------------------------------------------------------------
@@ -175,10 +270,14 @@ public:
 class EnvelopeFilter {
   std::vector<double> buf;
   double sum = 0;
-  int    idx = 0;
+  int idx = 0;
   const int sz;
+
 public:
-  EnvelopeFilter(int s) : sz(s) { buf.resize(s, 0.0); }
+  EnvelopeFilter(int s)
+    : sz(s) {
+    buf.resize(s, 0.0);
+  }
   double getEnvelope(double v) {
     sum -= buf[idx];
     sum += v;
@@ -193,28 +292,32 @@ public:
 // ---------------------------------------------------------------
 float EEGFilter(float in) {
   static float z1 = 0, z2 = 0;
-  float x   = in - (-1.22465158f) * z1 - (0.45044543f) * z2;
-  float out  = 0.05644846f * x + 0.11289692f * z1 + 0.05644846f * z2;
-  z2 = z1; z1 = x;
+  float x = in - (-1.22465158f) * z1 - (0.45044543f) * z2;
+  float out = 0.05644846f * x + 0.11289692f * z1 + 0.05644846f * z2;
+  z2 = z1;
+  z1 = x;
   return out;
 }
 
-NotchFilter      filters[3];
+NotchFilter filters[3];
 EMGHighPassFilter emgfilters[2];
-EnvelopeFilter   Envelopefilter1(16);
-EnvelopeFilter   Envelopefilter2(16);
+EnvelopeFilter Envelopefilter1(16);
+EnvelopeFilter Envelopefilter2(16);
 
 // ---------------------------------------------------------------
 //  sendCmd - only transmits over BLE when the command changes.
 // ---------------------------------------------------------------
 void sendCmd(uint32_t cmd) {
-  if (cmd == lastSentCmd) return;
+  if (cmd == lastSentCmd)
+    return;
   lastSentCmd = cmd;
   uint8_t val = (uint8_t)cmd;
   pCharacteristic_1->setValue(&val, 1);
   pCharacteristic_1->notify();
   Serial.print("cmd: ");
   Serial.println(cmd);
+  lastCmdSentMs = millis();
+  ledState = LED_BLUE_FADE;
 }
 
 // ---------------------------------------------------------------
@@ -235,7 +338,8 @@ void printMacAddress() {
 //  Serial command parser
 // ---------------------------------------------------------------
 void handleSerialCommands() {
-  if (!Serial.available()) return;
+  if (!Serial.available())
+    return;
 
   String line = Serial.readStringUntil('\n');
   line.trim();
@@ -264,14 +368,14 @@ void handleSerialCommands() {
   }
 
   if (line.startsWith("set ")) {
-    int firstSpace  = line.indexOf(' ');
+    int firstSpace = line.indexOf(' ');
     int secondSpace = line.indexOf(' ', firstSpace + 1);
     if (secondSpace == -1) {
       Serial.println("Usage: set <betathreshold|emg1threshold|emg2threshold> <value>");
       return;
     }
-    String   key    = line.substring(firstSpace + 1, secondSpace);
-    String   valStr = line.substring(secondSpace + 1);
+    String key = line.substring(firstSpace + 1, secondSpace);
+    String valStr = line.substring(secondSpace + 1);
     valStr.trim();
     uint32_t val = (uint32_t)valStr.toInt();
 
@@ -280,24 +384,61 @@ void handleSerialCommands() {
     if (key == "betathreshold") {
       betaThreshold = val;
       prefs.putUInt("betathr", betaThreshold);
-      Serial.print("betaThreshold set to "); Serial.println(betaThreshold);
+      Serial.print("betaThreshold set to ");
+      Serial.println(betaThreshold);
     } else if (key == "emg1threshold") {
       emg1Threshold = val;
       prefs.putUInt("emg1thr", emg1Threshold);
-      Serial.print("emg1Threshold set to "); Serial.println(emg1Threshold);
+      Serial.print("emg1Threshold set to ");
+      Serial.println(emg1Threshold);
     } else if (key == "emg2threshold") {
       emg2Threshold = val;
       prefs.putUInt("emg2thr", emg2Threshold);
-      Serial.print("emg2Threshold set to "); Serial.println(emg2Threshold);
+      Serial.print("emg2Threshold set to ");
+      Serial.println(emg2Threshold);
     } else {
-      Serial.print("Unknown key: "); Serial.println(key);
+      Serial.print("Unknown key: ");
+      Serial.println(key);
     }
 
     prefs.end();
     return;
   }
 
-  Serial.print("Unknown command: "); Serial.println(line);
+  Serial.print("Unknown command: ");
+  Serial.println(line);
+}
+
+// ---------------------------------------------------------------
+//  BLE status LED: pixel 0
+// ---------------------------------------------------------------
+void updateBLELed() {
+  uint32_t color;
+
+  if (ledState == LED_RED) {
+    color = pixel.Color(20, 0, 0);
+  } else if (ledState == LED_GREEN) {
+    color = pixel.Color(0, 20, 0);
+  } else {
+
+    unsigned long elapsed = millis() - lastCmdSentMs;
+
+    if (elapsed < BLUE_LED_DURATION) {
+      // hold blue color when packet is streaming
+      color = pixel.Color(0, 0, 30);
+    } else {
+      // 100 ms passed with no new command, return to green
+      ledState = LED_GREEN;
+      color = pixel.Color(0, 20, 0);
+    }
+  }
+
+  // only write to NeoPixel bus if color actually changed
+  if (color != lastPixel0Color) {
+    lastPixel0Color = color;
+    pixel.setPixelColor(BLE_LED, color);
+    pixel.show();
+  }
 }
 
 // ---------------------------------------------------------------
@@ -310,8 +451,11 @@ class MyServerCallbacks : public BLEServerCallbacks {
       digitalWrite(PIN_LED_VIB, HIGH);
       delay(120);
       digitalWrite(PIN_LED_VIB, LOW);
-      if (i == 0) delay(100);
+      if (i == 0)
+        delay(100);
     }
+    ledState = LED_GREEN;
+    pixelDirty = true;
     Serial.println("car connected");
     BLEDevice::getAdvertising()->stop();
   }
@@ -319,6 +463,8 @@ class MyServerCallbacks : public BLEServerCallbacks {
     deviceConnected = false;
     lastSentCmd = 255;
     digitalWrite(PIN_LED_VIB, LOW);
+    ledState = LED_RED;
+    pixelDirty = true;
     Serial.println("car disconnected, re-advertising");
     BLEDevice::startAdvertising();
   }
@@ -332,11 +478,16 @@ BandpowerResults calculateBandpower(float *ps, float binRes, int half) {
   for (int i = 1; i < half; i++) {
     float freq = i * binRes, p = ps[i];
     r.total += p;
-    if      (freq >= DELTA_LOW && freq < DELTA_HIGH) r.delta += p;
-    else if (freq >= THETA_LOW && freq < THETA_HIGH) r.theta += p;
-    else if (freq >= ALPHA_LOW && freq < ALPHA_HIGH) r.alpha += p;
-    else if (freq >= BETA_LOW  && freq < BETA_HIGH)  r.beta  += p;
-    else if (freq >= GAMMA_LOW && freq < GAMMA_HIGH) r.gamma += p;
+    if (freq >= DELTA_LOW && freq < DELTA_HIGH)
+      r.delta += p;
+    else if (freq >= THETA_LOW && freq < THETA_HIGH)
+      r.theta += p;
+    else if (freq >= ALPHA_LOW && freq < ALPHA_HIGH)
+      r.alpha += p;
+    else if (freq >= BETA_LOW && freq < BETA_HIGH)
+      r.beta += p;
+    else if (freq >= GAMMA_LOW && freq < GAMMA_HIGH)
+      r.gamma += p;
   }
   return r;
 }
@@ -345,7 +496,7 @@ void smoothBandpower(const BandpowerResults *raw, BandpowerResults *s) {
   s->delta = SMOOTHING_FACTOR * raw->delta + (1 - SMOOTHING_FACTOR) * s->delta;
   s->theta = SMOOTHING_FACTOR * raw->theta + (1 - SMOOTHING_FACTOR) * s->theta;
   s->alpha = SMOOTHING_FACTOR * raw->alpha + (1 - SMOOTHING_FACTOR) * s->alpha;
-  s->beta  = SMOOTHING_FACTOR * raw->beta  + (1 - SMOOTHING_FACTOR) * s->beta;
+  s->beta = SMOOTHING_FACTOR * raw->beta + (1 - SMOOTHING_FACTOR) * s->beta;
   s->gamma = SMOOTHING_FACTOR * raw->gamma + (1 - SMOOTHING_FACTOR) * s->gamma;
   s->total = SMOOTHING_FACTOR * raw->total + (1 - SMOOTHING_FACTOR) * s->total;
 }
@@ -357,13 +508,14 @@ void initFFT() {
   esp_err_t err = dsps_fft2r_init_fc32(NULL, FFT_SIZE);
   if (err != ESP_OK) {
     Serial.println("FFT init failed");
-    while (1) delay(10);
+    while (1)
+      delay(10);
   }
 }
 
 void processFFT() {
   for (int i = 0; i < FFT_SIZE; i++) {
-    y_cf[2 * i]     = inputBuffer[i];
+    y_cf[2 * i] = inputBuffer[i];
     y_cf[2 * i + 1] = 0;
   }
   dsps_fft2r_fc32(y_cf, FFT_SIZE);
@@ -378,8 +530,8 @@ void processFFT() {
 
   BandpowerResults raw = calculateBandpower(powerSpectrum, float(SAMPLE_RATE) / FFT_SIZE, half);
   smoothBandpower(&raw, &smoothedPowers);
-  float T   = smoothedPowers.total + EPS;
-  gBetaPct  = (smoothedPowers.beta / T) * 100.0f;
+  float T = smoothedPowers.total + EPS;
+  gBetaPct = (smoothedPowers.beta / T) * 100.0f;
 
   if (deviceConnected) {
     if (gBetaPct > betaThreshold && !isGoingBackward) {
@@ -388,18 +540,6 @@ void processFFT() {
       sendCmd(0);
     }
   }
-}
-
-// ---------------------------------------------------------------
-//  NeoPixel update
-// ---------------------------------------------------------------
-void updatePixels() {
-  pixel.setPixelColor(0, pixel.Color(255, 165, 0));
-  pixel.setPixelColor(5, deviceConnected
-                           ? pixel.Color(0, 255, 0)
-                           : pixel.Color(255, 0, 0));
-  pixel.setPixelColor(2, pixel.Color(0, 0, 0));
-  pixel.show();
 }
 
 // ---------------------------------------------------------------
@@ -413,18 +553,21 @@ void setup() {
   Serial.begin(BAUD_RATE);
 
   prefs.begin("thresholds", true);
-  betaThreshold = prefs.getUInt("betathr",  betaThreshold);
-  emg1Threshold = prefs.getUInt("emg1thr",  emg1Threshold);
-  emg2Threshold = prefs.getUInt("emg2thr",  emg2Threshold);
+  betaThreshold = prefs.getUInt("betathr", betaThreshold);
+  emg1Threshold = prefs.getUInt("emg1thr", emg1Threshold);
+  emg2Threshold = prefs.getUInt("emg2thr", emg2Threshold);
   prefs.end();
 
-  Serial.print("Loaded betaThreshold=");  Serial.print(betaThreshold);
-  Serial.print("  emg1Threshold=");       Serial.print(emg1Threshold);
-  Serial.print("  emg2Threshold=");       Serial.println(emg2Threshold);
+  Serial.print("Loaded betaThreshold=");
+  Serial.print(betaThreshold);
+  Serial.print("  emg1Threshold=");
+  Serial.print(emg1Threshold);
+  Serial.print("  emg2Threshold=");
+  Serial.println(emg2Threshold);
 
-  pinMode(INPUT_PIN1,  INPUT);
-  pinMode(INPUT_PIN2,  INPUT);
-  pinMode(INPUT_PIN3,  INPUT);
+  pinMode(INPUT_PIN1, INPUT);
+  pinMode(INPUT_PIN2, INPUT);
+  pinMode(INPUT_PIN3, INPUT);
   pinMode(PIN_LED_VIB, OUTPUT);
   digitalWrite(PIN_LED_VIB, LOW);
 
@@ -443,9 +586,7 @@ void setup() {
 
   pCharacteristic_2 = pService->createCharacteristic(
     CHARACTERISTIC_UUID_2,
-    BLECharacteristic::PROPERTY_READ  |
-    BLECharacteristic::PROPERTY_WRITE |
-    BLECharacteristic::PROPERTY_NOTIFY);
+    BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_NOTIFY);
 
   pDescr_1 = new BLEDescriptor((uint16_t)0x2901);
   pDescr_1->setValue("BCI Car Control");
@@ -467,8 +608,16 @@ void setup() {
   pAdvertising->setMinPreferred(0x06);
   pAdvertising->setMaxPreferred(0x12);
   BLEDevice::startAdvertising();
-
-  updatePixels();
+  int initBattery = getCurrentBatteryPercentage();
+  if (initBattery <= 20) {
+    batteryColor = pixel.Color(20, 0, 0);
+  } else if (initBattery <= 70) {
+    batteryColor = pixel.Color(35, 7, 0);
+  } else {
+    batteryColor = pixel.Color(0, 20, 0);
+  }
+  pixel.setPixelColor(BATTERY_LED, batteryColor);  // batteryColor is 0 at boot, pixel stays off
+  pixel.show();
   Serial.println("Advertising, waiting for car...");
   Serial.println("Serial commands:");
   Serial.println("  debug                      - start debug output");
@@ -483,10 +632,9 @@ void setup() {
 //  Loop
 // ---------------------------------------------------------------
 void loop() {
-  static uint16_t      idx        = 0;
+  static uint16_t idx = 0;
   static unsigned long lastMicros = micros();
-  static bool          pixelDirty = true;
-  static long          timer      = 0;
+  static long timer = 0;
 
   // ── debug print counter (counts samples, resets every N) ──
   static int debugSampleCount = 0;
@@ -496,10 +644,26 @@ void loop() {
 
   handleSerialCommands();
 
-  if (deviceConnected != oldDeviceConnected) pixelDirty = true;
   if (pixelDirty) {
-    updatePixels();
+    pixel.setPixelColor(BATTERY_LED, batteryColor);
+    pixel.show();
     pixelDirty = false;
+  }
+  updateBLELed();
+
+  unsigned long currentMillis = millis();
+
+  if (currentMillis - lastBatteryCheck >= BATTERY_CHECK_INTERVAL) {
+    int currentBattery = getCurrentBatteryPercentage();
+    if (currentBattery <= 20) {
+      batteryColor = pixel.Color(20, 0, 0);  // red
+    } else if (currentBattery <= 70) {
+      batteryColor = pixel.Color(35, 7, 0);  // orange
+    } else {
+      batteryColor = pixel.Color(0, 20, 0);  // green
+    }
+    pixelDirty = true;
+    lastBatteryCheck = currentMillis;
   }
 
   timer -= dt;
@@ -510,9 +674,11 @@ void loop() {
     int raw1 = analogRead(INPUT_PIN1);
     int raw2 = analogRead(INPUT_PIN2);
     int raw3 = analogRead(INPUT_PIN3);
+    batteryWinSum += analogRead(BATTERY_VOLTAGE_PIN);
+    batteryWinCount++;
 
     // ── Filtering ──
-    float filteeg  = EEGFilter(filters[0].process(raw1));
+    float filteeg = EEGFilter(filters[0].process(raw1));
     float filtemg1 = emgfilters[0].process(filters[1].process(raw2));
     float filtemg2 = emgfilters[1].process(filters[2].process(raw3));
 
@@ -521,7 +687,7 @@ void loop() {
     gEnv1 = Envelopefilter1.getEnvelope(abs(filtemg1));
     gEnv2 = Envelopefilter2.getEnvelope(abs(filtemg2));
 
-    // ── Debug print — once every N samples, no repetition ──
+    // ── Debug print once every N samples, no repetition ──
     if (debugEnabled) {
       if (++debugSampleCount >= DEBUG_PRINT_EVERY_N_SAMPLES) {
         debugSampleCount = 0;
@@ -557,15 +723,5 @@ void loop() {
   if (idx >= FFT_SIZE) {
     processFFT();
     idx = 0;
-  }
-
-  // ── BLE reconnect handling ──
-  if (!deviceConnected && oldDeviceConnected) {
-    delay(300);
-    BLEDevice::startAdvertising();
-    oldDeviceConnected = false;
-  }
-  if (deviceConnected && !oldDeviceConnected) {
-    oldDeviceConnected = true;
   }
 }
