@@ -34,29 +34,70 @@ typedef struct
 // Preferences object for saving thresholds
 Preferences preferences;
 
-const char *tello_pass = ""; // Tello has no password
-
 WiFiUDP udp;
-const char *TELLO_IP = "192.168.10.1";
-const int TELLO_PORT = 8889;
+
+// Forward declarations (some Arduino/ESP32 toolchains don't auto-prototype
+// functions defined later in the file when they're used earlier, e.g.
+// droneToggleFlight() being called inside processFFT()).
+void droneToggleFlight();
+void droneEmergency();
+void droneSendCommand(uint8_t cmd);
+bool connectToDrone();
+void updateDroneHeartbeat();
+void updateDroneControlLoop();
+void sendDroneHeartbeatPacket();
+void sendDroneControlPacket();
+void buildDroneControlMessage(uint8_t *out, int &len);
+
+// ===== DRONE CONNECTION =====
+// drone broadcasts an SSID like
+// "FLOW-UFO-XXXXXX", so we scan for anything starting with this prefix
+// instead of using a fixed SSID.
+const char *DRONE_SSID_PREFIX = "FLOW-UFO-";
+const char *DRONE_PASSWORD = "";  // set this if your FLOW-UFO drone requires a password
+const char *DRONE_IP = "192.168.1.1";
+const int DRONE_PORT = 7099;
+const int LOCAL_UDP_PORT = 8890;  // arbitrary local port for the outgoing socket
+
+// Ported from
+const unsigned long CONTROL_INTERVAL_MS = 50;
+const unsigned long HEARTBEAT_INTERVAL_MS = 50;
+const int HEARTBEAT_BURST_COUNT = 7;
+const unsigned long HEARTBEAT_BURST_INTERVAL_MS = 50;
+const unsigned long COMMAND_HOLD_MS = 500;
+
+const uint8_t DRONE_CMD_NONE = 0x00;
+const uint8_t DRONE_CMD_TAKE_OFF = 0x01;  // shared by takeoff & land - drone toggles flight state
+const uint8_t DRONE_CMD_EMERGENCY = 0x02;
+const uint8_t DRONE_CMD_UNLOCK_MOTOR = 0x40;
+const uint8_t DRONE_CMD_CALIBRATE_GYRO = 0x80;
+
+// Joystick-style stick values (0-255, 128 = neutral)
+const uint8_t STICK_NEUTRAL = 128;
+const uint8_t STICK_THROTTLE_UP = 158;
+const uint8_t STICK_THROTTLE_DOWN = 98;
+const uint8_t STICK_PITCH_FORWARD = 178;
+const uint8_t STICK_TURN = 158;
+
+uint8_t droneRoll = STICK_NEUTRAL;
+uint8_t dronePitch = STICK_NEUTRAL;
+uint8_t droneThrottle = STICK_NEUTRAL;
+uint8_t droneTurn = STICK_NEUTRAL;
+uint8_t droneCurrentCommand = DRONE_CMD_NONE;
+unsigned long droneCommandStartTime = 0;
+
+unsigned long lastControlSendTime = 0;
+unsigned long lastHeartbeatTime = 0;
+int heartbeatBurstSent = 0;
+bool heartbeatBurstDone = false;
 
 // UDP connection status
 bool udpConnected = false;
 unsigned long lastConnectionCheck = 0;
 const unsigned long CONNECTION_CHECK_INTERVAL = 5000;
 
-unsigned long lastCmdTime = 0;
-const unsigned long cmdCooldown = 100; // 100ms cooldown for RC commands
-
-// ===== FLIP CONTROL =====
-// When a flip is triggered, we pause RC commands for this duration
-// so Tello can execute the flip without RC interference
-bool flipPending = false;
-unsigned long flipStartTime = 0;
-const unsigned long FLIP_PAUSE_MS = 2000; // Pause RC for 2 seconds during flip
-
 // OTA Configuration
-const char *ap_ssid = "NPG-Lite-Tello";
+const char *ap_ssid = "NPG-Lite-UFO";
 const char *ap_password = "12345678";
 WebServer server(80);
 bool otaMode = false;
@@ -67,30 +108,9 @@ const unsigned long OTA_TRIGGER_DELAY = 1000;
 float currentBetaPercent = 0;
 float currentEMG1 = 0;
 float currentEMG2 = 0;
+bool TakeoffSent = false;  // <-- true after we've sent the one-time toggle for this connection
 unsigned long lastWebUpdate = 0;
 const unsigned long WEB_UPDATE_INTERVAL = 200;
-
-// ---- sendCommandSafe: normal cooldown ----
-void sendCommandSafe(const String &cmd)
-{
-  udp.beginPacket(TELLO_IP, TELLO_PORT);
-  udp.print(cmd);
-  udp.endPacket();
-  Serial.print("Sent: ");
-  Serial.println(cmd);
-}
-
-// ---- sendCommandImmediate: bypasses cooldown for critical commands ----
-// Use ONLY for flip, takeoff, land — not RC
-void sendCommandImmediate(const String &cmd)
-{
-  udp.beginPacket(TELLO_IP, TELLO_PORT);
-  udp.print(cmd);
-  udp.endPacket();
-  Serial.print("Sent (immediate): ");
-  Serial.println(cmd);
-  lastCmdTime = millis();
-}
 
 // Some variables to keep track on device connected
 Adafruit_NeoPixel pixel(6, 15, NEO_GRB + NEO_KHZ800);
@@ -165,15 +185,15 @@ unsigned long lastBuzzerToggleTime = 0;
 bool policeRedState = true;
 bool buzzerState = false;
 
-int melody[] = {NOTE_C4, NOTE_G3, NOTE_G3, NOTE_A3, NOTE_G3, 0, NOTE_B3, NOTE_C4};
-int noteDurations[] = {4, 8, 8, 4, 4, 4, 4, 4};
+int melody[] = { NOTE_C4, NOTE_G3, NOTE_G3, NOTE_A3, NOTE_G3, 0, NOTE_B3, NOTE_C4 };
+int noteDurations[] = { 4, 8, 8, 4, 4, 4, 4, 4 };
 
-float envelopeBuffer[ENVELOPE_WINDOW_SIZE] = {0};
+float envelopeBuffer[ENVELOPE_WINDOW_SIZE] = { 0 };
 int envelopeIndex = 0;
 float envelopeSum = 0;
 float currentEEGEnvelope = 0;
 
-float jawEnvelopeBuffer[ENVELOPE_WINDOW_SIZE] = {0};
+float jawEnvelopeBuffer[ENVELOPE_WINDOW_SIZE] = { 0 };
 int jawEnvelopeIndex = 0;
 float jawEnvelopeSum = 0;
 float currentJawEnvelope = 0;
@@ -187,14 +207,12 @@ float powerSpectrum[FFT_SIZE / 2];
 __attribute__((aligned(16))) float y_cf[FFT_SIZE * 2];
 float *y1_cf = &y_cf[0];
 
-BandpowerResults smoothedPowers = {0, 0, 0, 0, 0, 0};
+BandpowerResults smoothedPowers = { 0, 0, 0, 0, 0, 0 };
 
 // ----------------- NOTCH FILTER CLASSES -----------------
-class NotchFilter
-{
+class NotchFilter {
 private:
-  struct BiquadState
-  {
+  struct BiquadState {
     float z1 = 0;
     float z2 = 0;
   };
@@ -202,8 +220,7 @@ private:
   BiquadState state2;
 
 public:
-  float process(float input)
-  {
+  float process(float input) {
     float output = input;
     float x = output - (-1.56858163f * state1.z1) - (0.96424138f * state1.z2);
     output = 0.96508099f * x + (-1.56202714f * state1.z1) + (0.96508099f * state1.z2);
@@ -215,15 +232,13 @@ public:
     state2.z1 = x;
     return output;
   }
-  void reset()
-  {
+  void reset() {
     state1.z1 = state1.z2 = 0;
     state2.z1 = state2.z2 = 0;
   }
 };
 
-float highpass(float input)
-{
+float highpass(float input) {
   float output = input;
   {
     static float z1 = 0, z2 = 0;
@@ -235,15 +250,13 @@ float highpass(float input)
   return output;
 }
 
-class EMGHighPassFilter
-{
+class EMGHighPassFilter {
 private:
   double z1 = 0.0;
   double z2 = 0.0;
 
 public:
-  double process(double input)
-  {
+  double process(double input) {
     const double x = input - -0.82523238 * z1 - 0.29463653 * z2;
     const double output = 0.52996723 * x + -1.05993445 * z1 + 0.52996723 * z2;
     z2 = z1;
@@ -251,15 +264,13 @@ public:
     return output;
   }
 
-  void reset()
-  {
+  void reset() {
     z1 = 0.0;
     z2 = 0.0;
   }
 };
 
-class EnvelopeFilter
-{
+class EnvelopeFilter {
 private:
   std::vector<double> circularBuffer;
   double sum = 0.0;
@@ -268,13 +279,11 @@ private:
 
 public:
   EnvelopeFilter(int bufferSize)
-      : bufferSize(bufferSize)
-  {
+    : bufferSize(bufferSize) {
     circularBuffer.resize(bufferSize, 0.0);
   }
 
-  double getEnvelope(double absEmg)
-  {
+  double getEnvelope(double absEmg) {
     sum -= circularBuffer[dataIndex];
     sum += absEmg;
     circularBuffer[dataIndex] = absEmg;
@@ -282,8 +291,7 @@ public:
     return (sum / bufferSize);
   }
 
-  void reset()
-  {
+  void reset() {
     sum = 0.0;
     dataIndex = 0;
     for (int i = 0; i < bufferSize; i++)
@@ -291,8 +299,7 @@ public:
   }
 };
 
-float EEGFilter(float input)
-{
+float EEGFilter(float input) {
   float output = input;
   {
     static float z1 = 0, z2 = 0;
@@ -304,8 +311,7 @@ float EEGFilter(float input)
   return output;
 }
 
-float jawClenchFilter(float input)
-{
+float jawClenchFilter(float input) {
   float output = input;
   {
     static float z1 = 0, z2 = 0;
@@ -317,8 +323,7 @@ float jawClenchFilter(float input)
   return output;
 }
 
-float updateEEGEnvelope(float sample)
-{
+float updateEEGEnvelope(float sample) {
   float absSample = fabs(sample);
   envelopeSum -= envelopeBuffer[envelopeIndex];
   envelopeSum += absSample;
@@ -327,8 +332,7 @@ float updateEEGEnvelope(float sample)
   return envelopeSum / ENVELOPE_WINDOW_SIZE;
 }
 
-float updateJawEnvelope(float sample)
-{
+float updateJawEnvelope(float sample) {
   float absSample = fabs(sample);
   jawEnvelopeSum -= jawEnvelopeBuffer[jawEnvelopeIndex];
   jawEnvelopeSum += absSample;
@@ -339,12 +343,11 @@ float updateJawEnvelope(float sample)
 
 NotchFilter notchFilters[3];
 EMGHighPassFilter emgFilters[3];
-EnvelopeFilter envelopeFilterLeft(32);  // For left hand EMG
-EnvelopeFilter envelopeFilterRight(32); // For right hand EMG
+EnvelopeFilter envelopeFilterLeft(32);   // For left hand EMG
+EnvelopeFilter envelopeFilterRight(32);  // For right hand EMG
 
 // Function to load thresholds from preferences
-void loadThresholds()
-{
+void loadThresholds() {
   Serial.println("Loading thresholds from preferences...");
 
   preferences.begin("neuro-config", false);
@@ -369,8 +372,7 @@ void loadThresholds()
 }
 
 // Function to save thresholds to preferences
-void saveThresholds()
-{
+void saveThresholds() {
   preferences.begin("neuro-config", false);
 
   preferences.putFloat("betaTh", betaThreshold);
@@ -386,11 +388,9 @@ void saveThresholds()
 }
 
 // ----------------- BANDPOWER & SMOOTHING -----------------
-BandpowerResults calculateBandpower(float *ps, float binRes, int halfSize)
-{
-  BandpowerResults r = {0, 0, 0, 0, 0, 0};
-  for (int i = 1; i < halfSize; i++)
-  {
+BandpowerResults calculateBandpower(float *ps, float binRes, int halfSize) {
+  BandpowerResults r = { 0, 0, 0, 0, 0, 0 };
+  for (int i = 1; i < halfSize; i++) {
     float freq = i * binRes;
     float p = ps[i];
     r.total += p;
@@ -408,8 +408,7 @@ BandpowerResults calculateBandpower(float *ps, float binRes, int halfSize)
   return r;
 }
 
-void smoothBandpower(const BandpowerResults *raw, BandpowerResults *s)
-{
+void smoothBandpower(const BandpowerResults *raw, BandpowerResults *s) {
   s->delta = SMOOTHING_FACTOR * raw->delta + (1 - SMOOTHING_FACTOR) * s->delta;
   s->theta = SMOOTHING_FACTOR * raw->theta + (1 - SMOOTHING_FACTOR) * s->theta;
   s->alpha = SMOOTHING_FACTOR * raw->alpha + (1 - SMOOTHING_FACTOR) * s->alpha;
@@ -419,11 +418,9 @@ void smoothBandpower(const BandpowerResults *raw, BandpowerResults *s)
 }
 
 // ----------------- DSP FFT SETUP -----------------
-void initFFT()
-{
+void initFFT() {
   esp_err_t err = dsps_fft2r_init_fc32(NULL, FFT_SIZE);
-  if (err != ESP_OK)
-  {
+  if (err != ESP_OK) {
     Serial.println("FFT init failed");
     while (1)
       delay(10);
@@ -431,10 +428,8 @@ void initFFT()
 }
 
 // ----------------- PROCESS FFT -----------------
-void processFFT()
-{
-  for (int i = 0; i < FFT_SIZE; i++)
-  {
+void processFFT() {
+  for (int i = 0; i < FFT_SIZE; i++) {
     y_cf[2 * i] = inputBuffer[i];
     y_cf[2 * i + 1] = 0.0f;
   }
@@ -444,8 +439,7 @@ void processFFT()
   dsps_cplx2reC_fc32(y_cf, FFT_SIZE);
 
   int half = FFT_SIZE / 2;
-  for (int i = 0; i < half; i++)
-  {
+  for (int i = 0; i < half; i++) {
     float re = y1_cf[2 * i];
     float im = y1_cf[2 * i + 1];
     powerSpectrum[i] = re * re + im * im;
@@ -460,22 +454,23 @@ void processFFT()
   // Store current beta percentage for web display
   currentBetaPercent = (smoothedPowers.beta / T) * 100;
 
-  if (!emergencyStop && currentBetaPercent > betaThreshold)
-  {
-    sendCommandSafe("takeoff");
+  if (udpConnected && !emergencyStop && !TakeoffSent && currentBetaPercent > betaThreshold) {
+    delay(2000);
+    droneToggleFlight();  //takeoff
+    TakeoffSent = true;
+    Serial.println("take off send");
   }
 }
 
 // ----------------- WEB SERVER HANDLERS -----------------
-void handleRoot()
-{
+void handleRoot() {
   String html = R"rawliteral(
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>Neuro-Controller | NPG LITE Drone</title>
+    <title>ESP32-C6 Neuro-Controller | NPG LITE Drone</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body { min-height: 100%; background: #0a0c12; }
@@ -819,8 +814,7 @@ void handleRoot()
   server.send(200, "text/html", html);
 }
 
-void handleConfig()
-{
+void handleConfig() {
   String json = "{";
   json += "\"beta\":" + String(betaThreshold) + ",";
   json += "\"blink\":" + String(BlinkThreshold) + ",";
@@ -838,71 +832,53 @@ void handleConfig()
   server.send(200, "application/json", json);
 }
 
-void handleSet()
-{
+void handleSet() {
   bool changed = false;
-  if (server.hasArg("beta"))
-  {
+  if (server.hasArg("beta")) {
     betaThreshold = server.arg("beta").toFloat();
     changed = true;
   }
-  if (server.hasArg("blink"))
-  {
+  if (server.hasArg("blink")) {
     BlinkThreshold = server.arg("blink").toFloat();
     changed = true;
   }
-  if (server.hasArg("jawon"))
-  {
+  if (server.hasArg("jawon")) {
     JAW_ON_THRESHOLD = server.arg("jawon").toFloat();
     JAW_OFF_THRESHOLD = max(0.0f, JAW_ON_THRESHOLD - 10.0f);
     changed = true;
   }
-  if (server.hasArg("emgLeft"))
-  {
+  if (server.hasArg("emgLeft")) {
     EMG_THRESHOLD_LEFT = server.arg("emgLeft").toFloat();
     changed = true;
   }
-  if (server.hasArg("emgRight"))
-  {
+  if (server.hasArg("emgRight")) {
     EMG_THRESHOLD_RIGHT = server.arg("emgRight").toFloat();
     changed = true;
   }
-  if (changed)
-  {
+  if (changed) {
     saveThresholds();
     server.send(200, "text/plain", "OK");
-  }
-  else
+  } else
     server.send(400, "text/plain", "No parameters provided");
 }
 
-void handleUpdate()
-{
-  if (server.method() == HTTP_POST)
-  {
+void handleUpdate() {
+  if (server.method() == HTTP_POST) {
     HTTPUpload &upload = server.upload();
-    if (upload.status == UPLOAD_FILE_START)
-    {
+    if (upload.status == UPLOAD_FILE_START) {
       Serial.printf("Update: %s\n", upload.filename.c_str());
       if (!Update.begin(UPDATE_SIZE_UNKNOWN))
         Update.printError(Serial);
-    }
-    else if (upload.status == UPLOAD_FILE_WRITE)
-    {
+    } else if (upload.status == UPLOAD_FILE_WRITE) {
       if (Update.write(upload.buf, upload.currentSize) != upload.currentSize)
         Update.printError(Serial);
-    }
-    else if (upload.status == UPLOAD_FILE_END)
-    {
-      if (Update.end(true))
-      {
+    } else if (upload.status == UPLOAD_FILE_END) {
+      if (Update.end(true)) {
         Serial.printf("Update Success: %u\nRebooting...\n", upload.totalSize);
         server.send(200, "text/plain", "Update successful! Rebooting...");
         delay(100);
         ESP.restart();
-      }
-      else
-      {
+      } else {
         Update.printError(Serial);
         server.send(500, "text/plain", "Update failed");
       }
@@ -910,26 +886,24 @@ void handleUpdate()
   }
 }
 
-void setupWebServer()
-{
+void setupWebServer() {
   server.on("/", handleRoot);
   server.on("/config", handleConfig);
   server.on("/set", handleSet);
-  server.on("/update", HTTP_POST, []() {}, handleUpdate);
+  server.on(
+    "/update", HTTP_POST, []() {}, handleUpdate);
   server.begin();
   Serial.println("HTTP server started");
 }
 
-void startOTAMode()
-{
+void startOTAMode() {
   Serial.println("Starting OTA mode...");
   otaMode = true;
   memset(envelopeBuffer, 0, sizeof(envelopeBuffer));
   memset(jawEnvelopeBuffer, 0, sizeof(jawEnvelopeBuffer));
   envelopeSum = jawEnvelopeSum = 0;
   envelopeIndex = jawEnvelopeIndex = 0;
-  for (int i = 0; i < 3; i++)
-  {
+  for (int i = 0; i < 3; i++) {
     notchFilters[i].reset();
     emgFilters[i].reset();
   }
@@ -938,8 +912,7 @@ void startOTAMode()
   WiFi.softAP(ap_ssid, ap_password);
   Serial.print("AP IP address: ");
   Serial.println(WiFi.softAPIP());
-  if (MDNS.begin("npglite"))
-  {
+  if (MDNS.begin("npglite")) {
     MDNS.addService("http", "tcp", 80);
     Serial.println("mDNS: http://npglite.local");
   }
@@ -949,8 +922,7 @@ void startOTAMode()
   pixel.show();
 }
 
-void processSignalsForWeb()
-{
+void processSignalsForWeb() {
   static uint16_t idx = 0;
   static unsigned long lastMicros = micros();
   unsigned long now = micros();
@@ -958,8 +930,7 @@ void processSignalsForWeb()
   lastMicros = now;
   static long timer = 0;
   timer -= dt;
-  if (timer <= 0)
-  {
+  if (timer <= 0) {
     timer += 1000000L / SAMPLE_RATE;
     int raw1 = analogRead(INPUT_PIN1), raw2 = analogRead(INPUT_PIN2), raw3 = analogRead(INPUT_PIN3);
     float n1 = notchFilters[0].process(raw1), n2 = notchFilters[1].process(raw2), n3 = notchFilters[2].process(raw3);
@@ -968,40 +939,143 @@ void processSignalsForWeb()
     currentEMG2 = envelopeFilterLeft.getEnvelope(abs(emgFilters[1].process(n2)));
     currentEMG1 = envelopeFilterRight.getEnvelope(abs(emgFilters[2].process(n3)));
     inputBuffer[idx++] = EEGFilter(n1);
-    if (idx >= FFT_SIZE)
-    {
+    if (idx >= FFT_SIZE) {
       processFFT();
       idx = 0;
     }
   }
 }
 
-bool connectToAnyTello()
-{
-  Serial.println("Scanning for Tello drones...");
-  while (true)
-  {
+// ===================== DRONE PROTOCOL =====================
+
+// Connection heartbeat: standalone 2-byte 01 01 packet, independent of the
+// control stream. Burst of HEARTBEAT_BURST_COUNT at HEARTBEAT_BURST_INTERVAL_MS,
+// then settles to a steady HEARTBEAT_INTERVAL_MS cadence for as long as connected.
+void sendDroneHeartbeatPacket() {
+  uint8_t hb[2] = { 0x01, 0x01 };
+  udp.beginPacket(DRONE_IP, DRONE_PORT);
+  udp.write(hb, 2);
+  udp.endPacket();
+}
+
+void updateDroneHeartbeat() {
+  unsigned long now = millis();
+  if (!heartbeatBurstDone) {
+    if (heartbeatBurstSent == 0 || (now - lastHeartbeatTime >= HEARTBEAT_BURST_INTERVAL_MS)) {
+      lastHeartbeatTime = now;
+      sendDroneHeartbeatPacket();
+      heartbeatBurstSent++;
+      if (heartbeatBurstSent >= HEARTBEAT_BURST_COUNT)
+        heartbeatBurstDone = true;
+    }
+  } else if (now - lastHeartbeatTime >= HEARTBEAT_INTERVAL_MS) {
+    lastHeartbeatTime = now;
+    sendDroneHeartbeatPacket();
+  }
+}
+
+// 21-byte control packet: 0x03 0x66 0x14, sticks (or forced-neutral 0x80s
+// if an emergency command is embedded), command byte, fixed 0x02, 10 zero
+// bytes, checksum, 0x99 trailer. Checksum = XOR of the 6 bytes starting at
+// the first stick byte through the fixed 0x02.
+void buildDroneControlMessage(uint8_t *out, int &len) {
+  int i = 0;
+  out[i++] = 0x03;
+  out[i++] = 0x66;
+  out[i++] = 0x14;
+
+  if (droneCurrentCommand == DRONE_CMD_EMERGENCY) {
+    out[i++] = 0x80;
+    out[i++] = 0x80;
+    out[i++] = 0x80;
+    out[i++] = 0x80;
+  } else {
+    out[i++] = droneRoll;
+    out[i++] = dronePitch;
+    out[i++] = droneThrottle;
+    out[i++] = droneTurn;
+  }
+
+  out[i++] = droneCurrentCommand;
+  out[i++] = 0x02;
+
+  for (int z = 0; z < 10; z++)
+    out[i++] = 0x00;
+
+  uint8_t checksum = out[3] ^ out[4] ^ out[5] ^ out[6] ^ out[7] ^ out[8];
+  out[i++] = checksum;
+  out[i++] = 0x99;
+
+  len = i;  // 21
+}
+
+void sendDroneControlPacket() {
+  uint8_t packet[21];
+  int len;
+  buildDroneControlMessage(packet, len);
+  udp.beginPacket(DRONE_IP, DRONE_PORT);
+  udp.write(packet, len);
+  udp.endPacket();
+}
+
+// Call every loop() iteration. Sends the control packet at CONTROL_INTERVAL_MS
+// and auto-clears any embedded command after COMMAND_HOLD_MS, mirroring the
+// setTimeout in 's _sendCommand()/emergency().
+void updateDroneControlLoop() {
+  unsigned long now = millis();
+  if (now - lastControlSendTime >= CONTROL_INTERVAL_MS) {
+    lastControlSendTime = now;
+    sendDroneControlPacket();
+  }
+
+  if (droneCurrentCommand != DRONE_CMD_NONE && (now - droneCommandStartTime >= COMMAND_HOLD_MS)) {
+    droneCurrentCommand = DRONE_CMD_NONE;
+  }
+}
+
+// One-shot command, same "only one at a time" guard as  _sendCommand.
+void droneSendCommand(uint8_t cmd) {
+  if (droneCurrentCommand == DRONE_CMD_NONE) {
+    droneCurrentCommand = cmd;
+    droneCommandStartTime = millis();
+  }
+}
+
+// Takeoff/land share the same physical command byte -u the drone just
+// toggles flight state on it.
+void droneToggleFlight() {
+  droneSendCommand(DRONE_CMD_TAKE_OFF);
+}
+
+// Emergency stop bypasses the "one at a time" guard - preempts whatever is
+// currently embedded, and forces sticks neutral via buildDroneControlMessage.
+void droneEmergency() {
+  droneCurrentCommand = DRONE_CMD_EMERGENCY;
+  droneCommandStartTime = millis();
+}
+
+bool connectToDrone() {
+  Serial.println("Scanning for FLOW-UFO drones...");
+  while (true) {
     int n = WiFi.scanNetworks();
-    String telloSSID = "";
-    for (int i = 0; i < n; i++)
-    {
-      if (WiFi.SSID(i).startsWith("TELLO-"))
-      {
-        telloSSID = WiFi.SSID(i);
+    String droneSSID = "";
+    for (int i = 0; i < n; i++) {
+      if (WiFi.SSID(i).startsWith(DRONE_SSID_PREFIX)) {
+        droneSSID = WiFi.SSID(i);
         break;
       }
     }
     WiFi.scanDelete();
-    if (telloSSID.length() == 0)
-    {
+    if (droneSSID.length() == 0) {
       pixel.setPixelColor(5, pixel.Color(255, 0, 0));
       pixel.show();
       delay(3000);
       continue;
     }
-    WiFi.begin(telloSSID.c_str(), tello_pass);
-    while (WiFi.status() != WL_CONNECTED)
-    {
+    Serial.print("Found drone: ");
+    Serial.println(droneSSID);
+    WiFi.begin(droneSSID.c_str(), DRONE_PASSWORD);
+    while (WiFi.status() != WL_CONNECTED) {
       static bool tog = false;
       tog = !tog;
       pixel.setPixelColor(5, tog ? pixel.Color(255, 80, 0) : pixel.Color(0, 0, 0));
@@ -1010,30 +1084,27 @@ bool connectToAnyTello()
     }
     pixel.setPixelColor(5, pixel.Color(0, 255, 0));
     pixel.show();
+    Serial.println("Connected to drone");
+    TakeoffSent = false;  // <-- re-arm the one-time trigger for this new connection
     return true;
   }
 }
+// ===================================================================================
 
-void setPoliceLEDs()
-{
+void setPoliceLEDs() {
   unsigned long now = millis();
   static byte flashCount = 0;
   static bool ledState = false;
-  if (flashCount < 2)
-  {
-    if (now - lastPoliceFlashTime >= 100)
-    {
+  if (flashCount < 2) {
+    if (now - lastPoliceFlashTime >= 100) {
       lastPoliceFlashTime = now;
       ledState = !ledState;
-      if (ledState)
-      {
+      if (ledState) {
         for (int i = 0; i < 3; i++)
           pixel.setPixelColor(i, pixel.Color(255, 0, 0));
         for (int i = 3; i < 6; i++)
           pixel.setPixelColor(i, pixel.Color(0, 0, 0));
-      }
-      else
-      {
+      } else {
         for (int i = 0; i < 6; i++)
           pixel.setPixelColor(i, pixel.Color(0, 0, 0));
         flashCount++;
@@ -1042,22 +1113,16 @@ void setPoliceLEDs()
       }
       pixel.show();
     }
-  }
-  else if (flashCount < 4)
-  {
-    if (now - lastPoliceFlashTime >= 100)
-    {
+  } else if (flashCount < 4) {
+    if (now - lastPoliceFlashTime >= 100) {
       lastPoliceFlashTime = now;
       ledState = !ledState;
-      if (ledState)
-      {
+      if (ledState) {
         for (int i = 0; i < 3; i++)
           pixel.setPixelColor(i, pixel.Color(0, 0, 0));
         for (int i = 3; i < 6; i++)
           pixel.setPixelColor(i, pixel.Color(0, 0, 255));
-      }
-      else
-      {
+      } else {
         for (int i = 0; i < 6; i++)
           pixel.setPixelColor(i, pixel.Color(0, 0, 0));
         flashCount++;
@@ -1069,11 +1134,9 @@ void setPoliceLEDs()
   }
 }
 
-void controlEmergencyBuzzer()
-{
+void controlEmergencyBuzzer() {
   unsigned long now = millis();
-  if (now - lastBuzzerToggleTime >= 300)
-  {
+  if (now - lastBuzzerToggleTime >= 300) {
     lastBuzzerToggleTime = now;
     buzzerState = !buzzerState;
     if (buzzerState)
@@ -1083,90 +1146,72 @@ void controlEmergencyBuzzer()
   }
 }
 
-void checkConnectionStatus()
-{
+void checkConnectionStatus() {
   unsigned long now = millis();
-  if (now - lastConnectionCheck >= CONNECTION_CHECK_INTERVAL)
-  {
+  if (now - lastConnectionCheck >= CONNECTION_CHECK_INTERVAL) {
     lastConnectionCheck = now;
-    if (WiFi.status() == WL_CONNECTED)
-    {
-      if (!udpConnected)
-      {
+    if (WiFi.status() == WL_CONNECTED) {
+      if (!udpConnected) {
         udpConnected = true;
-        udp.begin(8889);
+        udp.begin(LOCAL_UDP_PORT);
         pixel.setPixelColor(5, pixel.Color(0, 255, 0));
         pixel.show();
       }
-    }
-    else
-    {
-      if (udpConnected)
-      {
+    } else {
+      if (udpConnected) {
         udpConnected = false;
         pixel.setPixelColor(5, pixel.Color(255, 0, 0));
         pixel.show();
-        connectToAnyTello();
+        connectToDrone();
       }
     }
   }
 }
 
-void setNormalLEDs()
-{
+void setNormalLEDs() {
   for (int i = 0; i < 6; i++)
     pixel.setPixelColor(i, pixel.Color(0, 0, 0));
   pixel.setPixelColor(5, udpConnected ? pixel.Color(0, 255, 0) : pixel.Color(255, 0, 0));
   pixel.show();
 }
 
-void sendContinuousLandCommands()
-{
+void sendContinuousLandCommands() {
   unsigned long now = millis();
-  if (!firstCommandSent)
-  {
-    sendCommandSafe("land");
+  if (!firstCommandSent) {
+    droneEmergency();
     lastLandCommandTime = now;
     firstCommandSent = true;
     secondCommandScheduled = true;
   }
-  if (secondCommandScheduled && (now - lastLandCommandTime >= 5000))
-  {
-    sendCommandSafe("land");
+  if (secondCommandScheduled && (now - lastLandCommandTime >= 5000)) {
     secondCommandScheduled = false;
   }
 }
 
-void handleEmergencyStop()
-{
+void handleEmergencyStop() {
   unsigned long now = millis();
-  if (digitalRead(BOOT_BUTTON) == LOW && (now - lastButtonPressTime) > BUTTON_DEBOUNCE_MS)
-  {
+  if (digitalRead(BOOT_BUTTON) == LOW && (now - lastButtonPressTime) > BUTTON_DEBOUNCE_MS) {
     lastButtonPressTime = now;
     emergencyStop = !emergencyStop;
-    if (emergencyStop)
-    {
-      sendCommandSafe("land");
+    if (emergencyStop) {
+      droneEmergency();
+      TakeoffSent = false;  // <-- re-arm the one-time trigger for this new connection
       tone(BUZZER_PIN, 1000, 500);
-    }
-    else
-    {
+    } else {
       noTone(BUZZER_PIN);
       setNormalLEDs();
     }
   }
 }
 
-void setup()
-{
+void setup() {
   Serial.begin(115200);
   pixel.begin();
   pixel.setPixelColor(5, pixel.Color(255, 0, 0));
   pixel.show();
   pinMode(LED_MOTOR_PIN, OUTPUT);
 
-  for (int thisNote = 0; thisNote < 8; thisNote++)
-  {
+  for (int thisNote = 0; thisNote < 8; thisNote++) {
     int noteDuration = 1000 / noteDurations[thisNote];
     tone(BUZZER_PIN, melody[thisNote], noteDuration);
     int pause = noteDuration * 1.30;
@@ -1182,21 +1227,17 @@ void setup()
   initFFT();
 
   bootTime = millis();
-  while (millis() - bootTime < OTA_TRIGGER_DELAY)
-  {
-    if (digitalRead(BOOT_BUTTON) == LOW)
-    {
+  while (millis() - bootTime < OTA_TRIGGER_DELAY) {
+    if (digitalRead(BOOT_BUTTON) == LOW) {
       startOTAMode();
       return;
     }
     delay(10);
   }
 
-  connectToAnyTello();
-  udp.begin(8889);
+  connectToDrone();
+  udp.begin(LOCAL_UDP_PORT);
   udpConnected = true;
-  sendCommandSafe("command");
-  delay(1000);
 
   pinMode(INPUT_PIN1, INPUT);
   pinMode(INPUT_PIN2, INPUT);
@@ -1208,16 +1249,13 @@ void setup()
   Serial.println("System ready!");
 }
 
-void loop()
-{
+void loop() {
   server.handleClient();
 
-  if (otaMode)
-  {
+  if (otaMode) {
     processSignalsForWeb();
     static unsigned long lastBlink = 0;
-    if (millis() - lastBlink > 500)
-    {
+    if (millis() - lastBlink > 500) {
       lastBlink = millis();
       static bool state = false;
       state = !state;
@@ -1231,9 +1269,13 @@ void loop()
   checkConnectionStatus();
   handleEmergencyStop();
 
-  if (emergencyStop)
-  {
-    sendContinuousLandCommands();
+  // Drone heartbeat + control packet cadence run independently of the
+  // biopotential sample timer.
+  updateDroneHeartbeat();
+  updateDroneControlLoop();
+
+  if (emergencyStop) {
+    // sendContinuousLandCommands();
     setPoliceLEDs();
     controlEmergencyBuzzer();
     return;
@@ -1249,8 +1291,7 @@ void loop()
 
   static long timer = 0;
   timer -= dt;
-  if (timer <= 0 && !otaMode)
-  {
+  if (timer <= 0 && !otaMode) {
     timer += 1000000L / SAMPLE_RATE;
 
     int raw1 = analogRead(INPUT_PIN1), raw2 = analogRead(INPUT_PIN2), raw3 = analogRead(INPUT_PIN3);
@@ -1267,11 +1308,9 @@ void loop()
     unsigned long nowMs = millis();
     bool jawBlockActive = (nowMs - lastJawDetectionTime) < JAW_BLOCK_DURATION_MS;
 
-    // ---- JAW CLENCH: toggle mode ----
-    if (!jawState)
-    {
-      if (currentJawEnvelope > JAW_ON_THRESHOLD && (nowMs - lastJawClenchTime) >= JAW_DEBOUNCE_MS)
-      {
+    // ---- JAW CLENCH: toggle mode ---- (unchanged)
+    if (!jawState) {
+      if (currentJawEnvelope > JAW_ON_THRESHOLD && (nowMs - lastJawClenchTime) >= JAW_DEBOUNCE_MS) {
         jawState = true;
         lastJawClenchTime = nowMs;
         lastJawDetectionTime = nowMs;
@@ -1279,49 +1318,28 @@ void loop()
         pixel.setPixelColor(0, is_rotation_mode ? pixel.Color(255, 255, 0) : pixel.Color(255, 0, 0));
         pixel.show();
       }
-    }
-    else
-    {
+    } else {
       if (currentJawEnvelope < JAW_OFF_THRESHOLD)
         jawState = false;
     }
 
-    // ---- BLINK DETECTION ----
-    // KEY FIX: Skip blink detection if a flip is currently executing
-    bool flipActive = flipPending && (nowMs - flipStartTime < FLIP_PAUSE_MS);
-
-    if (!jawBlockActive && !flipActive)
-    {
-      if (currentEEGEnvelope > BlinkThreshold && (nowMs - lastBlinkTime) >= BLINK_DEBOUNCE_MS)
-      {
+    // ---- BLINK DETECTION ---- (detection logic unchanged; this drone has
+    // no flip command, so a confirmed triple blink now toggles takeoff/land
+    // instead, giving a manual override alongside the beta-triggered one)
+    if (!jawBlockActive) {
+      if (currentEEGEnvelope > BlinkThreshold && (nowMs - lastBlinkTime) >= BLINK_DEBOUNCE_MS) {
         lastBlinkTime = nowMs;
-        if (blinkCount == 0)
-        {
+        if (blinkCount == 0) {
           firstBlinkTime = nowMs;
           blinkCount = 1;
-        }
-        else if (blinkCount == 1 && (nowMs - firstBlinkTime) <= DOUBLE_BLINK_MS)
-        {
+        } else if (blinkCount == 1 && (nowMs - firstBlinkTime) <= DOUBLE_BLINK_MS) {
           blinkCount = 2;
-        }
-        else if (blinkCount == 2 && (nowMs - firstBlinkTime) <= TRIPLE_BLINK_MS)
-        {
-          // =============================================
-          // FLIP FIX:
-          // 1. Stop RC immediately (drone must hover)
-          // 2. Send flip command
-          // 3. Set flipPending flag — RC is paused for FLIP_PAUSE_MS
-          // =============================================
-          sendCommandImmediate("rc 0 0 0 0"); // Step 1: stop RC
-          delay(200);                         // Step 2: short delay so Tello processes stop
-          sendCommandImmediate("flip r");     // Step 3: send flip
-          flipPending = true;
-          flipStartTime = nowMs;
-          Serial.println("FLIP triggered! RC paused for 2s.");
+        } else if (blinkCount == 2 && (nowMs - firstBlinkTime) <= TRIPLE_BLINK_MS && TakeoffSent) {
+          droneToggleFlight();  // triple blink = emergency land
+          TakeoffSent = false;  // <-- re-arm the one-time trigger for this new connection
+          Serial.println("Triple blink: takeoff/land toggled.");
           blinkCount = 0;
-        }
-        else
-        {
+        } else {
           firstBlinkTime = nowMs;
           blinkCount = 1;
         }
@@ -1332,36 +1350,29 @@ void loop()
         blinkCount = 0;
     }
 
-    // ---- EMG CONTINUOUS RC CONTROL ----
-    // Skip RC commands while flip is executing
-    if (!jawBlockActive && !flipActive)
-    {
+    droneRoll = STICK_NEUTRAL;
+    dronePitch = STICK_NEUTRAL;
+    droneThrottle = STICK_NEUTRAL;
+    droneTurn = STICK_NEUTRAL;
+
+    if (!jawBlockActive) {
       bool emg1Active = currentEMG1 > EMG_THRESHOLD_LEFT;
       bool emg2Active = currentEMG2 > EMG_THRESHOLD_RIGHT;
 
-      if (emg1Active)
-      {
-        sendCommandSafe(is_rotation_mode ? "rc 0 100 0 0" : "rc 0 0 100 0");
-      }
-      else if (emg2Active)
-      {
-        sendCommandSafe(is_rotation_mode ? "rc 0 0 0 100" : "rc 0 0 -100 0");
-      }
-      else
-      {
-        sendCommandSafe("rc 0 0 0 0");
+      if (is_rotation_mode) {
+        if (emg1Active)
+          dronePitch = STICK_PITCH_FORWARD;  // forward
+        else if (emg2Active)
+          droneTurn = STICK_TURN;  // rotate
+      } else {
+        if (emg1Active)
+          droneThrottle = STICK_THROTTLE_UP;  // up
+        else if (emg2Active)
+          droneThrottle = STICK_THROTTLE_DOWN;  // down
       }
     }
 
-    // Clear flip flag after pause duration
-    if (flipPending && (nowMs - flipStartTime >= FLIP_PAUSE_MS))
-    {
-      flipPending = false;
-      Serial.println("Flip pause done. RC resumed.");
-    }
-
-    if (idx >= FFT_SIZE && !otaMode)
-    {
+    if (idx >= FFT_SIZE && !otaMode) {
       processFFT();
       idx = 0;
     }
